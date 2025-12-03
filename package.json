@@ -1,0 +1,13 @@
+{
+  "name": "boiler-controller",
+  "version": "1.0.0",
+  "description": "This repository contains a FastAPI-based web server for monitoring and controlling a 14‑zone hydronic boiler system that reports the following signals:",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}

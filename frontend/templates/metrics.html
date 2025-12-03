@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Metrics · Boiler Controller{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="card-header">
+      <h2>Zone Summary</h2>
+      <div class="header-actions">
+        <label>
+          <span>Window</span>
+          <select id="statsWindow">
+            <option value="day">Day</option>
+            <option value="week">Week</option>
+            <option value="month">Month</option>
+          </select>
+        </label>
+        <label>
+          <span>Day</span>
+          <input id="statsDay" type="date" />
+        </label>
+        <button id="refreshStats" class="small-btn" type="button">Refresh Summary</button>
+      </div>
+    </div>
+    <p id="statsSummaryLabel" class="muted">Summary window</p>
+    <div class="table-wrapper">
+      <table id="zoneStatsTable">
+        <thead>
+          <tr>
+            <th>Zone</th>
+            <th>Room</th>
+            <th id="statsCallsHeader">Calls (Day)</th>
+            <th>Avg Run/Call</th>
+            <th id="statsTotalHeader">Total Run (Day)</th>
+            <th>Avg Room Temp</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Populated by app.js -->
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <h2>Recent Events</h2>
+      <div class="header-actions">
+        <label>
+          <span>Zone</span>
+          <select id="zoneSelect">
+            <option value="">Select zone…</option>
+            {% for zone in zone_choices %}
+            <option value="{{ zone.zone }}">{{ zone.zone }} — {{ zone.room }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Day</span>
+          <input id="daySelect" type="date" />
+        </label>
+        <button id="refreshZones" class="small-btn" type="button">Refresh Zones</button>
+        <button id="refreshEvents" class="small-btn" type="button">Refresh Events</button>
+      </div>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="zoneChart" width="1100" height="420"></canvas>
+      <div id="chartEmpty" class="chart-empty">Select a zone to view its history.</div>
+    </div>
+    <div class="table-wrapper">
+      <table id="eventsTable">
+        <thead>
+          <tr>
+            <th>Zone</th>
+            <th>Room</th>
+            <th>State</th>
+            <th>Duration</th>
+            <th>Room Temp</th>
+            <th>Pipe Temp</th>
+            <th>Outside Temp</th>
+            <th>Date</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Populated by app.js -->
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    window.__INITIAL_EVENTS__ = [];
+    window.__ZONE_CHOICES__ = {{ zone_choices | tojson }};
+  </script>
+  {{ super() }}
+{% endblock %}

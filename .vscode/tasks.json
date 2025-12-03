@@ -1,0 +1,50 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Lint: ruff",
+      "type": "shell",
+      "command": ".\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "ruff", "check", "."],
+      "group": "build",
+      "problemMatcher": ["$python"],
+      "options": {"cwd": "${workspaceFolder}"}
+    },
+    {
+      "label": "Lint: black --check",
+      "type": "shell",
+      "command": ".\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "black", "--check", "."],
+      "group": "build",
+      "problemMatcher": [],
+      "options": {"cwd": "${workspaceFolder}"}
+    },
+    {
+      "label": "Lint: isort --check-only",
+      "type": "shell",
+      "command": ".\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "isort", "--check-only", "."],
+      "group": "build",
+      "problemMatcher": [],
+      "options": {"cwd": "${workspaceFolder}"}
+    },
+    {
+      "label": "Format: black + isort",
+      "type": "shell",
+      "command": ".\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "isort", "."],
+      "group": "none",
+      "problemMatcher": [],
+      "options": {"cwd": "${workspaceFolder}"}
+    },
+    {
+      "label": "Format: black",
+      "type": "shell",
+      "command": ".\\.venv\\Scripts\\python.exe",
+      "args": ["-m", "black", "."],
+      "group": "none",
+      "problemMatcher": [],
+      "options": {"cwd": "${workspaceFolder}"}
+    }
+  ]
+}

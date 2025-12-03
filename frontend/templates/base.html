@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}Boiler Controller{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+  </head>
+  <body
+    class="page page-{{ active_page or 'dashboard' }} {% block body_class %}{% endblock %}"
+    data-page="{{ active_page or 'dashboard' }}"
+  >
+    <header class="site-header">
+      <div class="container">
+        <a href="/" class="brand">
+          <span class="logo-mark" aria-hidden="true">🔥</span>
+          <div class="brand-text">
+            <span class="brand-title">Boiler Controller</span>
+            <span class="brand-subtitle">Cabin Heat Monitor</span>
+          </div>
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          <a href="/" class="{% if active_page == 'dashboard' %}active{% endif %}">Dashboard</a>
+          <a href="/graphs" class="{% if active_page == 'graphs' %}active{% endif %}">Graphs</a>
+          <a href="/scheduler" class="{% if active_page == 'scheduler' %}active{% endif %}">Scheduler</a>
+          <a href="/metrics" class="{% if active_page == 'metrics' %}active{% endif %}">Metrics</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page-content container">
+      {% block content %}{% endblock %}
+    </main>
+
+    <div id="pageLoading" class="page-loading hidden">Loading…</div>
+
+    {% block modals %}{% endblock %}
+
+    {% block scripts %}
+      <script src="/static/js/app.js" type="module"></script>
+    {% endblock %}
+  </body>
+</html>

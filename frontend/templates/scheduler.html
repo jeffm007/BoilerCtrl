@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Scheduler · Boiler Controller{% endblock %}
+
+{% block content %}
+  <section class="card">
+    <div class="card-header">
+      <h2>Weekly Scheduler</h2>
+      <p class="muted">Drag bubbles to adjust setpoints for every zone.</p>
+    </div>
+    <div class="scheduler-controls">
+      <label>
+        <span>Zone</span>
+        <select id="schedulerZoneSelect">
+          {% for zone in zone_choices %}
+          <option value="{{ zone.zone }}">{{ zone.zone }} — {{ zone.room }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button id="schedulerAddBtn" class="small-btn" type="button">Add Setpoint</button>
+      <button id="schedulerSaveBtn" class="small-btn primary" type="button" disabled>Save Zone Schedule</button>
+      <button id="schedulerResetBtn" class="small-btn" type="button" disabled>Reset</button>
+    </div>
+    <div class="scheduler-secondary-controls">
+      <label>
+        <span>Copy day source</span>
+        <select id="schedulerCopyDaySource"></select>
+      </label>
+      <label>
+        <span>Copy to days</span>
+        <select id="schedulerCopyDayTargets" multiple></select>
+        <button id="schedulerCopyDayBtn" class="small-btn" type="button">Copy day</button>
+      </label>
+      <label>
+        <span>Copy to zones</span>
+        <select id="schedulerCopyZoneTargets" multiple></select>
+        <button id="schedulerCopyZoneBtn" class="small-btn" type="button">Copy zones</button>
+      </label>
+      <label>
+        <span>Presets</span>
+        <select id="schedulerPresetSelect"></select>
+        <div class="preset-buttons">
+          <button id="schedulerPresetPreviewBtn" class="small-btn" type="button">Preview</button>
+          <button id="schedulerPresetApplyBtn" class="small-btn" type="button">Apply</button>
+          <button id="schedulerPresetSaveBtn" class="small-btn" type="button">Save current as preset</button>
+          <button id="schedulerPresetApplyGlobalBtn" class="small-btn" type="button">Apply to all zones</button>
+        </div>
+      </label>
+    </div>
+    <div id="schedulerGridWrapper" class="scheduler-grid-wrapper">
+      <div id="schedulerGrid" class="scheduler-grid">
+        <div class="scheduler-header">
+          <div class="scheduler-day-label header">Day</div>
+          <div id="schedulerTimeRow" class="scheduler-time-row"></div>
+        </div>
+        <div id="schedulerBody" class="scheduler-body"></div>
+      </div>
+    </div>
+    <p class="scheduler-note">Drag bubbles or click empty slots to edit setpoints. Save to apply changes.</p>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    window.__ZONE_CHOICES__ = {{ zone_choices | tojson }};
+  </script>
+  {{ super() }}
+{% endblock %}

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Graphs · Boiler Controller{% endblock %}
+
+{% block content %}
+  <section class="card graphs-controls-card">
+    <div class="graphs-controls">
+      <label>
+        <span>Range</span>
+        <select id="graphsRange">
+          <option value="day" selected>Day</option>
+          <option value="week">Week</option>
+          <option value="month">Month</option>
+        </select>
+      </label>
+      <label id="graphsDayWrapper">
+        <span>Day (optional)</span>
+        <input id="graphsDay" type="date" />
+      </label>
+      <label id="graphsMonthWrapper" class="hidden">
+        <span>Month (optional)</span>
+        <select id="graphsMonth">
+          <option value="">—</option>
+          <option value="01">January</option>
+          <option value="02">February</option>
+          <option value="03">March</option>
+          <option value="04">April</option>
+          <option value="05">May</option>
+          <option value="06">June</option>
+          <option value="07">July</option>
+          <option value="08">August</option>
+          <option value="09">September</option>
+          <option value="10">October</option>
+          <option value="11">November</option>
+          <option value="12">December</option>
+        </select>
+      </label>
+      <div class="graphs-buttons">
+        <button id="refreshGraphs" class="small-btn primary" type="button">Refresh graphs</button>
+        <button id="graphsClearDay" class="small-btn ghost" type="button">Show last 24 hours</button>
+      </div>
+    </div>
+    <p id="graphsInfo" class="graphs-info muted">Showing last 24 hours (rolling).</p>
+  </section>
+
+  <section id="graphsGrid" class="graphs-grid">
+    {% for zone in zones %}
+    <article class="zone-graph-card card" data-zone="{{ zone.zone_name }}" data-room="{{ zone.room_name or zone.zone_name }}">
+      <div class="zone-graph-header">
+        <div>
+          <h3>{{ zone.zone_name }}</h3>
+          <p>{{ zone.room_name or '—' }}</p>
+        </div>
+        <span class="graph-meta" data-role="status">Loading…</span>
+      </div>
+      <div class="graph-canvas">
+        <canvas width="640" height="320" aria-label="Temperature chart for {{ zone.zone_name }}"></canvas>
+        <div class="graph-empty">Loading…</div>
+      </div>
+    </article>
+    {% endfor %}
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    window.__ZONE_CHOICES__ = {{ zone_choices | tojson }};
+  </script>
+  {{ super() }}
+{% endblock %}
