@@ -147,3 +147,4 @@ See `backend/database.py` for schema creation.
 - Implement the hardware controller for your specific relay + optocoupler wiring.
 - Hook your real-time data collection script to call the REST endpoints (or directly use the repository layer).
 - Extend the frontend with richer charts (e.g., Plotly) and authentication if remote access is required.
+# BoilerCtrl
