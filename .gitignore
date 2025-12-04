@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+data/boiler_controller.sqlite3
+data/boiler_controller.sqlite3-wal
+data/boiler_controller.sqlite3-shm
+data/*.db
+data/*.db-wal
+data/*.db-shm

@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  web-dashboard:
+    build: .
+    container_name: boiler-web-dashboard
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PI_WS_URL=ws://YOUR_PI_IP:8001/ws
+      - CACHE_TTL=10
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    networks:
+      - boiler-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  boiler-net:
+    driver: bridge

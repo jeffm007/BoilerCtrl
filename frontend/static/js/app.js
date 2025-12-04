@@ -1,3 +1,5 @@
+// VERSION: 4.0 - Setpoint debugging
+console.log("🔧 App.js loaded - VERSION 4.0");
 const API_BASE = "/api";
 const DEFAULT_TIME_ZONE = "America/Denver";
 
@@ -100,8 +102,8 @@ function gridDayToApiDay(gridDay) {
 }
 const ZONE_CHOICES = Array.isArray(window.__ZONE_CHOICES__)
   ? window.__ZONE_CHOICES__.map((z) =>
-      typeof z === "string" ? { zone: z, room: z } : z
-    )
+    typeof z === "string" ? { zone: z, room: z } : z
+  )
   : [];
 let activeScheduleZone = null;
 let scheduleDirty = false;
@@ -403,8 +405,8 @@ function createScheduleRow(entry) {
     <td>
       <select class="schedule-day">
         ${DAY_LABELS.map(
-          (label, idx) => `<option value="${idx}" ${idx === entry.day ? "selected" : ""}>${label}</option>`
-        ).join("")}
+    (label, idx) => `<option value="${idx}" ${idx === entry.day ? "selected" : ""}>${label}</option>`
+  ).join("")}
       </select>
     </td>
     <td><input class="schedule-start" type="time" value="${safeStart}" /></td>
@@ -424,8 +426,8 @@ function renderScheduleEntries(entries, { markClean = false } = {}) {
     : undefined;
   const currentTargets = copyDayTargetSelect
     ? Array.from(copyDayTargetSelect.selectedOptions)
-        .map((opt) => Number.parseInt(opt.value, 10))
-        .filter((value) => !Number.isNaN(value))
+      .map((opt) => Number.parseInt(opt.value, 10))
+      .filter((value) => !Number.isNaN(value))
     : [];
   const currentZoneTargets = copyZonesSelect
     ? Array.from(copyZonesSelect.selectedOptions).map((opt) => opt.value)
@@ -486,8 +488,8 @@ async function openScheduleModal(zoneName, roomLabel, options = {}) {
     const label = isGlobalSchedule
       ? "Global Default Schedule"
       : roomLabel
-      ? `${roomLabel} (${zoneName})`
-      : zoneName;
+        ? `${roomLabel} (${zoneName})`
+        : zoneName;
     scheduleZoneLabel.textContent = label;
   }
 
@@ -660,10 +662,13 @@ function updateZoneRow(row, zone) {
   const setpointInput = row.querySelector(".setpoint-input");
   if (setpointInput) {
     if (setpointValue === null || setpointValue === undefined) {
+      console.log(`[UpdateRow] ${zoneName}: setpoint is null/undefined, clearing input`);
       setpointInput.value = "";
       setpointInput.placeholder = "—";
     } else {
-      setpointInput.value = Number.parseFloat(setpointValue).toFixed(1);
+      const formatted = Number.parseFloat(setpointValue).toFixed(1);
+      console.log(`[UpdateRow] ${zoneName}: setting setpoint input to ${formatted} (from ${setpointValue})`);
+      setpointInput.value = formatted;
     }
   }
   const setpointPlaceholder = row.querySelector(".setpoint-placeholder");
@@ -936,9 +941,8 @@ function buildSchedulerGrid() {
   schedulerTimeRow.innerHTML = slotLabels
     .map((label, index) => {
       const majorTick = index % 2 === 0;
-      return `<div class="time-cell" data-slot="${index}">${
-        majorTick ? label : ""
-      }</div>`;
+      return `<div class="time-cell" data-slot="${index}">${majorTick ? label : ""
+        }</div>`;
     })
     .join("");
 
@@ -1050,8 +1054,7 @@ async function loadSchedulerPresets(selectedId) {
       ${presets
         .map(
           (preset) =>
-            `<option value="${preset.Id ?? preset.id}">${
-              preset.Name ?? preset.name
+            `<option value="${preset.Id ?? preset.id}">${preset.Name ?? preset.name
             }</option>`
         )
         .join("")}
@@ -2224,23 +2227,34 @@ if (zonesTable) {
         return;
       }
 
-    try {
-      setpointBtn.disabled = true;
-      setpointBtn.classList.add("loading");
-      const updated = await fetchJson(`${API_BASE}/zones/${zoneName}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_setpoint_f: value }),
-      });
-      updateZoneRow(row, updated);
-    } catch (error) {
-      console.error("Failed to update setpoint", error);
-    } finally {
-      setpointBtn.classList.remove("loading");
-      setpointBtn.disabled = false;
+      try {
+        setpointBtn.disabled = true;
+        setpointBtn.classList.add("loading");
+        console.log(`[Setpoint] Saving ${zoneName} setpoint: ${value}`);
+        const updated = await fetchJson(`${API_BASE}/zones/${zoneName}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target_setpoint_f: value }),
+        });
+        console.log(`[Setpoint] Response received:`, updated);
+        // Update row with response data
+        if (updated && updated.zone) {
+          console.log(`[Setpoint] Updating row with zone data, setpoint=${updated.zone.TargetSetpoint_F || updated.zone.target_setpoint_f}`);
+          updateZoneRow(row, updated.zone);
+          updateZonesCache({ zones: [updated.zone] });
+        } else {
+          console.log(`[Setpoint] Updating row with direct data, setpoint=${updated.TargetSetpoint_F || updated.target_setpoint_f}`);
+          updateZoneRow(row, updated);
+          updateZonesCache({ zones: [updated] });
+        }
+      } catch (error) {
+        console.error("Failed to update setpoint", error);
+      } finally {
+        setpointBtn.classList.remove("loading");
+        setpointBtn.disabled = false;
+      }
+      return;
     }
-    return;
-  }
 
     const button = event.target.closest("button.action");
     if (!button) return;
@@ -2252,12 +2266,16 @@ if (zonesTable) {
     try {
       button.disabled = true;
       button.classList.add("loading");
-      await fetchJson(`${API_BASE}/zones/${zoneName}/command`, {
+      const response = await fetchJson(`${API_BASE}/zones/${zoneName}/command`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command }),
       });
-      await refreshZones();
+      // Update just this zone row with the response data
+      if (response && response.zone) {
+        updateZoneRow(row, response.zone);
+        updateZonesCache({ zones: [response.zone] });
+      }
     } catch (error) {
       console.error("Failed to send command", error);
     } finally {
@@ -2858,6 +2876,12 @@ function initializeChart() {
       daySelect.value = selectedDay;
     }
     loadZoneHistory(initialZone, selectedDay);
+  } else {
+    // No zone selected - ensure chart shows default message
+    if (chartEmpty) {
+      chartEmpty.style.display = "flex";
+      chartEmpty.textContent = "Select a zone to view its history.";
+    }
   }
 }
 
@@ -3326,10 +3350,15 @@ function prepareHistoryData(data) {
 }
 
 async function loadGraphsForDay(dayOverride, { force = false } = {}) {
-  if (!graphsState.cards.length) return;
+  console.log("[Graphs] loadGraphsForDay called, cards.length:", graphsState.cards.length);
+  if (!graphsState.cards.length) {
+    console.log("[Graphs] No cards found, returning early");
+    return;
+  }
   const selection = getGraphsRangeSelection(dayOverride);
   const request = buildHistoryRequest(selection.params);
   const zones = graphsState.cards.map((entry) => entry.zone);
+  console.log("[Graphs] Loading history for zones:", zones);
   const cacheKey = `${request.queryString}|${zones.join(",")}`;
   if (graphsInfo) {
     graphsInfo.textContent = selection.label;
@@ -3349,6 +3378,7 @@ async function loadGraphsForDay(dayOverride, { force = false } = {}) {
   try {
     let histories = force ? null : getCachedHistories(cacheKey);
     if (!histories) {
+      console.log("[Graphs] Fetching history from API:", `${API_BASE}/zones/history/batch?${request.queryString}`);
       const response = await fetchJson(
         `${API_BASE}/zones/history/batch?${request.queryString}`,
         {
@@ -3357,8 +3387,11 @@ async function loadGraphsForDay(dayOverride, { force = false } = {}) {
           body: JSON.stringify({ zones }),
         }
       );
+      console.log("[Graphs] API response:", response);
       histories = response?.histories || {};
       setCachedHistories(cacheKey, histories);
+    } else {
+      console.log("[Graphs] Using cached histories");
     }
     const spanDays = Math.max(
       1,
