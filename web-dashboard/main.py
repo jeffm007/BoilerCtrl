@@ -29,13 +29,14 @@ from shared.schemas import (
     ZoneScheduleCloneRequest, GlobalScheduleUpdateRequest
 )
 from shared.sync_protocol import SyncClient
+import os
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Configuration
-PI_WS_URL = "ws://localhost:8001/ws"  # Update with actual Pi URL
-PI_HTTP_URL = "http://localhost:8001"  # HTTP endpoint for proxying requests
+# Configuration - read from environment variables
+PI_WS_URL = os.getenv("PI_WS_URL", "ws://localhost:8001/ws")
+PI_HTTP_URL = os.getenv("PI_HTTP_URL", "http://localhost:8001")
 CACHE_TTL = 30  # seconds - increased since Pi sends updates every 5 seconds
 CACHE_SERVE_STALE_TTL = 300  # seconds - serve stale data up to 5 minutes if disconnected
 APP_START_TIME = int(datetime.utcnow().timestamp())  # For cache busting
@@ -76,7 +77,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Boiler Web Dashboard", version="0.1.0", lifespan=lifespan)
 
 # Mount static files and templates
-frontend_path = Path(__file__).parent.parent / "frontend"
+# Check if running in Docker (frontend at /app/frontend) or locally (../frontend)
+if Path("/app/frontend").exists():
+    frontend_path = Path("/app/frontend")
+else:
+    frontend_path = Path(__file__).parent.parent / "frontend"
 app.mount("/static", StaticFiles(directory=frontend_path / "static"), name="static")
 templates = Jinja2Templates(directory=frontend_path / "templates")
 

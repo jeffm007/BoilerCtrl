@@ -41,6 +41,17 @@ class Settings:
     time_zone: str = os.getenv("BOILER_TIME_ZONE", "America/Denver")
 
     def __post_init__(self) -> None:
+        # Resolve paths relative to repo root (parent of backend package)
+        repo_root = Path(__file__).parent.parent
+
+        # Make database_path absolute if it's relative
+        if not self.database_path.is_absolute():
+            self.database_path = repo_root / self.database_path
+
+        # Make zone_config_path absolute if it's relative
+        if not self.zone_config_path.is_absolute():
+            self.zone_config_path = repo_root / self.zone_config_path
+
         if not self.zone_names:
             # BOILER_ZONE_NAMES not provided, fall back to Z1..Z14
             self.zone_names = default_zone_names()
