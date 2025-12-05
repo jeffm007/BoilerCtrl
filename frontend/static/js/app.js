@@ -661,14 +661,25 @@ function updateZoneRow(row, zone) {
   const setpointValue = getProp(zone, "target_setpoint_f", "TargetSetpoint_F", "targetSetpointF");
   const setpointInput = row.querySelector(".setpoint-input");
   if (setpointInput) {
-    if (setpointValue === null || setpointValue === undefined) {
-      console.log(`[UpdateRow] ${zoneName}: setpoint is null/undefined, clearing input`);
-      setpointInput.value = "";
-      setpointInput.placeholder = "—";
+    // Check if user is actively editing OR if this field was just saved
+    const isActive = document.activeElement === setpointInput;
+    const justSaved = setpointInput.dataset.justSaved === 'true';
+
+    if (!isActive && !justSaved) {
+      // Only update if user isn't actively editing and didn't just save
+      if (setpointValue === null || setpointValue === undefined) {
+        console.log(`[UpdateRow] ${zoneName}: setpoint is null/undefined, clearing input`);
+        setpointInput.value = "";
+        setpointInput.placeholder = "—";
+      } else {
+        const formatted = Number.parseFloat(setpointValue).toFixed(1);
+        console.log(`[UpdateRow] ${zoneName}: setting setpoint input to ${formatted} (from ${setpointValue})`);
+        setpointInput.value = formatted;
+      }
+    } else if (justSaved) {
+      console.log(`[UpdateRow] ${zoneName}: skipping update, field was just saved`);
     } else {
-      const formatted = Number.parseFloat(setpointValue).toFixed(1);
-      console.log(`[UpdateRow] ${zoneName}: setting setpoint input to ${formatted} (from ${setpointValue})`);
-      setpointInput.value = formatted;
+      console.log(`[UpdateRow] ${zoneName}: skipping update, field has focus`);
     }
   }
   const setpointPlaceholder = row.querySelector(".setpoint-placeholder");
@@ -2230,6 +2241,8 @@ if (zonesTable) {
       try {
         setpointBtn.disabled = true;
         setpointBtn.classList.add("loading");
+        // Mark the input as "just saved" to prevent overwriting by polling
+        input.dataset.justSaved = 'true';
         console.log(`[Setpoint] Saving ${zoneName} setpoint: ${value}`);
         const updated = await fetchJson(`${API_BASE}/zones/${zoneName}`, {
           method: "PATCH",
@@ -2237,18 +2250,22 @@ if (zonesTable) {
           body: JSON.stringify({ target_setpoint_f: value }),
         });
         console.log(`[Setpoint] Response received:`, updated);
-        // Update row with response data
+        // Don't call updateZoneRow - just update the cache
+        // This prevents the input field from being overwritten
         if (updated && updated.zone) {
-          console.log(`[Setpoint] Updating row with zone data, setpoint=${updated.zone.TargetSetpoint_F || updated.zone.target_setpoint_f}`);
-          updateZoneRow(row, updated.zone);
+          console.log(`[Setpoint] Updating cache with zone data, setpoint=${updated.zone.TargetSetpoint_F || updated.zone.target_setpoint_f}`);
           updateZonesCache({ zones: [updated.zone] });
         } else {
-          console.log(`[Setpoint] Updating row with direct data, setpoint=${updated.TargetSetpoint_F || updated.target_setpoint_f}`);
-          updateZoneRow(row, updated);
+          console.log(`[Setpoint] Updating cache with direct data, setpoint=${updated.TargetSetpoint_F || updated.target_setpoint_f}`);
           updateZonesCache({ zones: [updated] });
         }
+        // Clear the "just saved" flag after 3 seconds
+        setTimeout(() => {
+          input.dataset.justSaved = 'false';
+        }, 3000);
       } catch (error) {
         console.error("Failed to update setpoint", error);
+        input.dataset.justSaved = 'false';
       } finally {
         setpointBtn.classList.remove("loading");
         setpointBtn.disabled = false;
