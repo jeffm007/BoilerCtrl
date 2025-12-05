@@ -979,8 +979,9 @@ function buildSchedulerGrid() {
 }
 
 function getTempBand(temp) {
-  if (temp >= 72) return "WARM";
-  if (temp <= 64) return "COOL";
+  const numTemp = Number(temp);
+  if (numTemp > 70) return "WARM";
+  if (numTemp < 60) return "COOL";
   return "NEUTRAL";
 }
 
@@ -1094,7 +1095,7 @@ function timeStringToSlot(value) {
 }
 
 function serializeSchedulerEntries(entries) {
-  return entries
+  const serialized = entries
     .map((entry) => {
       const startMinutes = entry.start * 30;
       let endMinutes = startMinutes + entry.duration * 30;
@@ -1116,6 +1117,7 @@ function serializeSchedulerEntries(entries) {
       }
       return a.start_time.localeCompare(b.start_time);
     });
+  return serialized;
 }
 
 function addSchedulerEntry(zone, day, slot, duration = 2, temp = 68) {
