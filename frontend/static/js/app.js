@@ -2224,8 +2224,10 @@ if (copyDaySourceSelect && copyDayTargetSelect) {
 }
 
 // Delegate button clicks so each row can trigger FORCE_ON/OFF/AUTO.
-if (zonesTable) {
-  zonesTable.addEventListener("click", async (event) => {
+// Re-select zonesTable in case it wasn't available when module loaded
+const zonesTableElement = zonesTable || document.querySelector("#zonesTable tbody");
+if (zonesTableElement) {
+  zonesTableElement.addEventListener("click", async (event) => {
     const setpointBtn = event.target.closest("button.setpoint-save");
     if (setpointBtn) {
       const row = setpointBtn.closest("tr[data-zone]");
@@ -2290,10 +2292,10 @@ if (zonesTable) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command }),
       });
-      // Update just this zone row with the response data
-      if (response && response.zone) {
-        updateZoneRow(row, response.zone);
-        updateZonesCache({ zones: [response.zone] });
+      // Update just this zone row with the response data (response is the zone object directly)
+      if (response) {
+        updateZoneRow(row, response);
+        updateZonesCache({ zones: [response] });
       }
     } catch (error) {
       console.error("Failed to send command", error);
@@ -2303,7 +2305,7 @@ if (zonesTable) {
     }
   });
 
-  zonesTable.addEventListener("keydown", (event) => {
+  zonesTableElement.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && event.target.classList.contains("setpoint-input")) {
       event.preventDefault();
       const row = event.target.closest("tr[data-zone]");
