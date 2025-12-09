@@ -36,8 +36,10 @@ def get_connection() -> Generator[Union[sqlite3.Connection, Any], None, None]:
         if not PSYCOPG2_AVAILABLE:
             raise RuntimeError("psycopg2 is required for PostgreSQL but not installed")
 
-        conn = psycopg2.connect(settings.database_url)
-        conn.cursor_factory = psycopg2.extras.RealDictCursor
+        conn = psycopg2.connect(
+            settings.database_url,
+            cursor_factory=psycopg2.extras.RealDictCursor
+        )
         try:
             yield conn
         finally:
@@ -75,6 +77,9 @@ _SQLITE_SCHEMA_STATEMENTS: Iterable[str] = (
         PipeTemp_F REAL,
         TargetSetpoint_F REAL,
         ControlMode TEXT NOT NULL CHECK (ControlMode IN ('AUTO', 'MANUAL', 'THERMOSTAT')),
+        SetpointOverrideAt TEXT,
+        SetpointOverrideMode TEXT CHECK (SetpointOverrideMode IN ('boundary', 'permanent', 'timed')),
+        SetpointOverrideUntil TEXT,
         UpdatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """,
@@ -178,6 +183,9 @@ _POSTGRES_SCHEMA_STATEMENTS: Iterable[str] = (
         PipeTemp_F REAL,
         TargetSetpoint_F REAL,
         ControlMode TEXT NOT NULL CHECK (ControlMode IN ('AUTO', 'MANUAL', 'THERMOSTAT')),
+        SetpointOverrideAt TIMESTAMP,
+        SetpointOverrideMode TEXT CHECK (SetpointOverrideMode IN ('boundary', 'permanent', 'timed')),
+        SetpointOverrideUntil TIMESTAMP,
         UpdatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
     """,
@@ -352,6 +360,80 @@ def _ensure_duration_seconds_column(conn: Union[sqlite3.Connection, Any]) -> Non
                 raise
 
 
+def _ensure_setpoint_override_column(conn: Union[sqlite3.Connection, Any]) -> None:
+    """Add SetpointOverrideAt column to ZoneStatus if it doesn't exist."""
+    if settings.database_type == "postgresql":
+        # Use PostgreSQL syntax to add column if not exists
+        cursor = conn.cursor()
+        cursor.execute("""
+            DO $$
+            BEGIN
+                BEGIN
+                    ALTER TABLE ZoneStatus ADD COLUMN SetpointOverrideAt TIMESTAMP;
+                EXCEPTION
+                    WHEN duplicate_column THEN NULL;
+                END;
+            END $$;
+        """)
+        cursor.close()
+    else:
+        # SQLite syntax
+        try:
+            conn.execute("ALTER TABLE ZoneStatus ADD COLUMN SetpointOverrideAt TEXT;")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+
+
+def _ensure_override_mode_column(conn: Union[sqlite3.Connection, Any]) -> None:
+    """Add SetpointOverrideMode column to ZoneStatus if it doesn't exist."""
+    if settings.database_type == "postgresql":
+        cursor = conn.cursor()
+        cursor.execute("""
+            DO $$
+            BEGIN
+                BEGIN
+                    ALTER TABLE ZoneStatus ADD COLUMN SetpointOverrideMode TEXT
+                    CHECK (SetpointOverrideMode IN ('boundary', 'permanent', 'timed'));
+                EXCEPTION
+                    WHEN duplicate_column THEN NULL;
+                END;
+            END $$;
+        """)
+        cursor.close()
+    else:
+        # SQLite syntax - note: can't add CHECK constraint via ALTER TABLE
+        try:
+            conn.execute("ALTER TABLE ZoneStatus ADD COLUMN SetpointOverrideMode TEXT;")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+
+
+def _ensure_override_until_column(conn: Union[sqlite3.Connection, Any]) -> None:
+    """Add SetpointOverrideUntil column to ZoneStatus if it doesn't exist."""
+    if settings.database_type == "postgresql":
+        cursor = conn.cursor()
+        cursor.execute("""
+            DO $$
+            BEGIN
+                BEGIN
+                    ALTER TABLE ZoneStatus ADD COLUMN SetpointOverrideUntil TIMESTAMP;
+                EXCEPTION
+                    WHEN duplicate_column THEN NULL;
+                END;
+            END $$;
+        """)
+        cursor.close()
+    else:
+        # SQLite syntax
+        try:
+            conn.execute("ALTER TABLE ZoneStatus ADD COLUMN SetpointOverrideUntil TEXT;")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+
+
 def bootstrap_zone_rows(conn: Union[sqlite3.Connection, Any]) -> None:
     """
     Ensure that each zone (plus the special Boiler row) exists exactly once.
@@ -359,7 +441,16 @@ def bootstrap_zone_rows(conn: Union[sqlite3.Connection, Any]) -> None:
     cursor = conn.cursor()
     cursor.execute("SELECT ZoneName FROM ZoneStatus;")
     existing = cursor.fetchall()
-    existing_names = {row["ZoneName"] if isinstance(row, dict) else row[0] for row in existing}
+    # Handle both dict-style (RealDictRow/SQLite dict_factory) and tuple results
+    # PostgreSQL returns lowercase column names, SQLite preserves case
+    if existing and isinstance(existing[0], dict):
+        # Try both ZoneName and zonename for compatibility
+        if "ZoneName" in existing[0]:
+            existing_names = {row["ZoneName"] for row in existing}
+        else:
+            existing_names = {row["zonename"] for row in existing}
+    else:
+        existing_names = {row[0] for row in existing}
 
     rows_to_insert = [
         (
@@ -431,6 +522,9 @@ def init_db() -> None:
 
         _ensure_zone_status_control_mode(conn)
         _ensure_duration_seconds_column(conn)
+        _ensure_setpoint_override_column(conn)
+        _ensure_override_mode_column(conn)
+        _ensure_override_until_column(conn)
 
         bootstrap_zone_rows(conn)
         conn.commit()

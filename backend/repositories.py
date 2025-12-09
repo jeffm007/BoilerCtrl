@@ -1,14 +1,31 @@
 """
-Data access layer for SQLite.
+Data access layer for SQLite and PostgreSQL.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
 import sqlite3
 
 from .database import get_connection
+from .config import settings
+
+
+def _execute_query(conn: Any, query: str, params: tuple = ()) -> Any:
+    """
+    Execute a query with parameters, handling both SQLite and PostgreSQL.
+    For PostgreSQL, converts ? placeholders to %s.
+    """
+    if settings.database_type == "postgresql":
+        # Convert ? placeholders to %s for PostgreSQL
+        pg_query = query.replace("?", "%s")
+        cursor = conn.cursor()
+        cursor.execute(pg_query, params)
+        return cursor
+    else:
+        # SQLite can execute directly on connection
+        return conn.execute(query, params)
 
 
 def list_zone_status() -> List[Dict[str, Any]]:
@@ -16,14 +33,17 @@ def list_zone_status() -> List[Dict[str, Any]]:
     Return current status rows for the 14 heating zones (Boiler excluded).
     """
     with get_connection() as conn:
-        rows = conn.execute(
+        cursor = _execute_query(
+            conn,
             """
             SELECT *
             FROM ZoneStatus
-            WHERE ZoneName != 'Boiler'
+            WHERE ZoneName != ?
             ORDER BY CAST(SUBSTR(ZoneName, 2) AS INTEGER)
-            """
-        ).fetchall()
+            """,
+            ("Boiler",)
+        )
+        rows = cursor.fetchall()
     return rows
 
 
@@ -32,9 +52,8 @@ def get_zone_status(zone_name: str) -> Optional[Dict[str, Any]]:
     Fetch a single zone row by its identifier (e.g., 'Z3' or 'Boiler').
     """
     with get_connection() as conn:
-        row = conn.execute(
-            "SELECT * FROM ZoneStatus WHERE ZoneName = ?;", (zone_name,)
-        ).fetchone()
+        cursor = _execute_query(conn, "SELECT * FROM ZoneStatus WHERE ZoneName = ?;", (zone_name,))
+        row = cursor.fetchone()
     return row
 
 
@@ -46,6 +65,10 @@ def update_zone_status(
     pipe_temp_f: Optional[float] = None,
     target_setpoint_f: Optional[float] = None,
     control_mode: Optional[str] = None,
+    setpoint_override_at: Optional[datetime] = None,
+    setpoint_override_mode: Optional[str] = None,
+    setpoint_override_until: Optional[datetime] = None,
+    clear_override: bool = False,
     updated_at: Optional[datetime] = None,
 ) -> None:
     # We build the SQL statement dynamically so that only provided fields are updated.
@@ -67,6 +90,19 @@ def update_zone_status(
     if control_mode is not None:
         assignments.append("ControlMode = ?")
         params.append(control_mode)
+    if setpoint_override_at is not None:
+        assignments.append("SetpointOverrideAt = ?")
+        params.append(setpoint_override_at.isoformat())
+    if setpoint_override_mode is not None:
+        assignments.append("SetpointOverrideMode = ?")
+        params.append(setpoint_override_mode)
+    if setpoint_override_until is not None:
+        assignments.append("SetpointOverrideUntil = ?")
+        params.append(setpoint_override_until.isoformat())
+    if clear_override:
+        assignments.append("SetpointOverrideAt = NULL")
+        assignments.append("SetpointOverrideMode = NULL")
+        assignments.append("SetpointOverrideUntil = NULL")
 
     if not assignments:
         # Nothing to update; exit early instead of sending an empty UPDATE statement.
@@ -81,9 +117,10 @@ def update_zone_status(
     params.append(zone_name)
 
     with get_connection() as conn:
-        conn.execute(
+        _execute_query(
+            conn,
             f"UPDATE ZoneStatus SET {', '.join(assignments)} WHERE ZoneName = ?;",
-            params,
+            tuple(params),
         )
         conn.commit()
 

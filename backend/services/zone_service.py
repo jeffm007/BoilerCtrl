@@ -39,6 +39,37 @@ from .event_service import EventService
 logger = logging.getLogger(__name__)
 
 
+def _normalize_row_keys(row: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalize database row keys to Pascal case for consistent access.
+    PostgreSQL returns lowercase column names, SQLite preserves case.
+    """
+    if not row:
+        return row
+    
+    # Mapping of lowercase keys to expected PascalCase
+    key_map = {
+        "zonename": "ZoneName",
+        "currentstate": "CurrentState",
+        "zoneroomtemp_f": "ZoneRoomTemp_F",
+        "pipetemp_f": "PipeTemp_F",
+        "targetsetpoint_f": "TargetSetpoint_F",
+        "controlmode": "ControlMode",
+        "updatedat": "UpdatedAt",
+        "setpointoverrideat": "SetpointOverrideAt",
+        "setpointoverridemode": "SetpointOverrideMode",
+        "setpointoverrideuntil": "SetpointOverrideUntil",
+    }
+    
+    normalized = {}
+    for key, value in row.items():
+        # Use the mapped key if it exists, otherwise keep original
+        normalized_key = key_map.get(key.lower(), key)
+        normalized[normalized_key] = value
+    
+    return normalized
+
+
 def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
     """Parse ISO or SQLite-style timestamps into datetime objects."""
     if not value:
@@ -176,7 +207,8 @@ class ZoneService:
         )
         processed: List[Dict[str, Any]] = []
         for row in rows:
-            processed.append(self._decorate_row(self._sync_auto_setpoint(row)))
+            normalized = _normalize_row_keys(row)
+            processed.append(self._decorate_row(self._sync_auto_setpoint(normalized)))
         duration = time.perf_counter() - start_time
         logger.info(
             "zones.list include_boiler=%s rows=%s duration=%.3fs",
@@ -193,18 +225,55 @@ class ZoneService:
         row = repositories.get_zone_status(zone_name)
         if not row:
             raise KeyError(f"Zone {zone_name} not found")
-        row = self._decorate_row(self._sync_auto_setpoint(row))
-        return ZoneStatusModel.model_validate(row)
+        normalized = _normalize_row_keys(row)
+        normalized = self._decorate_row(self._sync_auto_setpoint(normalized))
+        return ZoneStatusModel.model_validate(normalized)
 
     def update_zone(self, zone_name: str, payload: ZoneUpdateRequest) -> ZoneStatusModel:
         """
         Persist setpoint or control-mode adjustments made from the dashboard.
+        If updating setpoint while in AUTO mode, mark it as a manual override.
+        Supports three override modes:
+        - 'boundary': override until next schedule boundary (default)
+        - 'permanent': override indefinitely
+        - 'timed': override until specific datetime
         """
-        repositories.update_zone_status(
-            zone_name,
-            target_setpoint_f=payload.target_setpoint_f,
-            control_mode=payload.control_mode,
-        )
+        # Check if this is a setpoint change in AUTO mode
+        if payload.target_setpoint_f is not None:
+            current = repositories.get_zone_status(zone_name)
+            if current and current.get("ControlMode") == "AUTO":
+                # Mark as manual override with timestamp and mode
+                from datetime import datetime
+                override_mode = payload.override_mode or "boundary"
+                override_until = None
+
+                # Parse override_until if in timed mode
+                if override_mode == "timed" and payload.override_until:
+                    try:
+                        override_until = datetime.fromisoformat(payload.override_until.replace("Z", "+00:00"))
+                    except ValueError:
+                        logger.warning(f"Invalid override_until datetime: {payload.override_until}")
+                        override_mode = "boundary"  # Fallback to boundary mode
+
+                repositories.update_zone_status(
+                    zone_name,
+                    target_setpoint_f=payload.target_setpoint_f,
+                    setpoint_override_at=datetime.now(),
+                    setpoint_override_mode=override_mode,
+                    setpoint_override_until=override_until,
+                )
+            else:
+                repositories.update_zone_status(
+                    zone_name,
+                    target_setpoint_f=payload.target_setpoint_f,
+                )
+
+        if payload.control_mode is not None:
+            repositories.update_zone_status(
+                zone_name,
+                control_mode=payload.control_mode,
+            )
+
         return self.get_zone(zone_name)
 
     def command_zone(self, zone_name: str, payload: ZoneCommandRequest) -> ZoneStatusModel:
@@ -753,6 +822,10 @@ class ZoneService:
     def _sync_auto_setpoint(self, row: Dict[str, Any]) -> Dict[str, Any]:
         """
         Ensure AUTO-controlled zones reflect the scheduled setpoint immediately.
+        Respects manual overrides based on mode:
+        - 'boundary': override until next schedule boundary (schedule change detected)
+        - 'permanent': override indefinitely until manually cleared
+        - 'timed': override until specified datetime
         """
         control_mode = row.get("ControlMode")
         zone_name = row.get("ZoneName")
@@ -769,12 +842,72 @@ class ZoneService:
             return row
 
         current_setpoint = row.get("TargetSetpoint_F")
+        override_at = row.get("SetpointOverrideAt")
+        override_mode = row.get("SetpointOverrideMode")
+        override_until = row.get("SetpointOverrideUntil")
+
+        # Check if there's a manual override active
+        if override_at is not None and override_mode is not None:
+            from datetime import datetime
+
+            # Handle 'timed' mode - check if override has expired
+            if override_mode == "timed" and override_until is not None:
+                try:
+                    if isinstance(override_until, str):
+                        try:
+                            until_time = datetime.fromisoformat(override_until.replace('Z', '+00:00'))
+                        except:
+                            until_time = datetime.strptime(override_until, "%Y-%m-%d %H:%M:%S")
+                    else:
+                        until_time = override_until
+
+                    # Check if override has expired
+                    if datetime.now() >= until_time:
+                        # Override expired, clear it and apply schedule
+                        repositories.update_zone_status(zone_name,
+                                                       target_setpoint_f=scheduled_setpoint,
+                                                       clear_override=True)
+                        current_setpoint = scheduled_setpoint
+                        row["TargetSetpoint_F"] = current_setpoint
+                        return row
+                except Exception as e:
+                    logger.warning(f"Failed to parse override_until for {zone_name}: {e}")
+                    # Clear malformed override
+                    repositories.update_zone_status(zone_name,
+                                                   target_setpoint_f=scheduled_setpoint,
+                                                   clear_override=True)
+                    current_setpoint = scheduled_setpoint
+                    row["TargetSetpoint_F"] = current_setpoint
+                    return row
+
+            # Handle 'permanent' mode - never clear automatically
+            if override_mode == "permanent":
+                return row
+
+            # Handle 'boundary' mode - clear on schedule change
+            if override_mode == "boundary":
+                # Check if the scheduled setpoint has changed since the override
+                if current_setpoint is not None and abs(scheduled_setpoint - current_setpoint) > 0.05:
+                    # Schedule has changed - this is a schedule boundary, clear override
+                    repositories.update_zone_status(zone_name,
+                                                   target_setpoint_f=scheduled_setpoint,
+                                                   clear_override=True)
+                    current_setpoint = scheduled_setpoint
+                    row["TargetSetpoint_F"] = current_setpoint
+                    return row
+                else:
+                    # Schedule hasn't changed, keep the override
+                    return row
+
+        # No override or override not applicable, apply schedule as normal
         if current_setpoint is None or abs(current_setpoint - scheduled_setpoint) > 0.05:
             repositories.update_zone_status(zone_name, target_setpoint_f=scheduled_setpoint)
             current_setpoint = scheduled_setpoint
 
-        if current_setpoint != scheduled_setpoint:
-            current_setpoint = scheduled_setpoint
+        if row.get("TargetSetpoint_F") != current_setpoint:
+            row = dict(row)
+            row["TargetSetpoint_F"] = current_setpoint
+        return row
 
         if row.get("TargetSetpoint_F") != current_setpoint:
             row = dict(row)

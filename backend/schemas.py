@@ -66,9 +66,15 @@ class UniformSetpointRequest(BaseModel):
 class ZoneUpdateRequest(BaseModel):
     """
     Payload accepted when the dashboard tweaks setpoint or control mode.
+    Supports three override modes:
+    - 'boundary': override until next schedule boundary (default)
+    - 'permanent': override indefinitely
+    - 'timed': override until specific datetime
     """
     target_setpoint_f: Optional[float] = None
     control_mode: Optional[Literal["AUTO", "MANUAL", "THERMOSTAT"]] = None
+    override_mode: Optional[Literal["boundary", "permanent", "timed"]] = "boundary"
+    override_until: Optional[str] = None  # ISO datetime string for 'timed' mode
 
 
 class ZoneCommandRequest(BaseModel):
