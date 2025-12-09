@@ -25,10 +25,15 @@ class Settings:
     Simple settings object populated from environment variables.
     """
 
-    # SQLite file path. Defaults to ./data/boiler_controller.sqlite3 relative to repo root.
+    # Database configuration
+    # If DATABASE_URL is set (e.g., postgresql://user:pass@host:5432/dbname), use PostgreSQL
+    # Otherwise, fall back to SQLite using BOILER_DB_PATH
+    database_url: str = os.getenv("DATABASE_URL", "")
     database_path: Path = Path(
         os.getenv("BOILER_DB_PATH", "data/boiler_controller.sqlite3")
     )
+    database_type: str = ""  # Will be set in __post_init__: "postgresql" or "sqlite"
+
     hardware_mode: str = os.getenv("BOILER_HARDWARE_MODE", "mock")
     outdoor_sensor_name: str = os.getenv("BOILER_OUTDOOR_SENSOR", "outdoor")
     zone_names: List[str] = field(
@@ -44,7 +49,13 @@ class Settings:
         # Resolve paths relative to repo root (parent of backend package)
         repo_root = Path(__file__).parent.parent
 
-        # Make database_path absolute if it's relative
+        # Determine database type
+        if self.database_url and self.database_url.startswith(("postgresql://", "postgres://")):
+            self.database_type = "postgresql"
+        else:
+            self.database_type = "sqlite"
+
+        # Make database_path absolute if it's relative (for SQLite)
         if not self.database_path.is_absolute():
             self.database_path = repo_root / self.database_path
 
@@ -62,8 +73,8 @@ class Settings:
                 if name.strip()
             ]
 
-        # Lazily create the directory that will hold our SQLite file.
-        if not self.database_path.parent.exists():
+        # Lazily create the directory that will hold our SQLite file (if using SQLite)
+        if self.database_type == "sqlite" and not self.database_path.parent.exists():
             # Creates ./data/ if we are using the default path
             self.database_path.parent.mkdir(parents=True, exist_ok=True)
 
