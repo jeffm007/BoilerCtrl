@@ -1,5 +1,7 @@
 # Boiler Controller Web Server
 
+**Remote PostgreSQL Development Setup - Active!** ✅
+
 This repository contains a FastAPI-based web server for monitoring and controlling a 14‑zone hydronic boiler system that reports the following signals:
 
 - Zone `Call for Heat` state (detected via optically isolated 24 VAC inputs).
