@@ -119,7 +119,7 @@ The frontend will need to be updated to:
 
 ## Testing Recommendations
 
-1. **Boundary Mode**: 
+1. **Boundary Mode**:
    - Set override, verify it persists through polling
    - Wait for schedule change, verify override clears
 

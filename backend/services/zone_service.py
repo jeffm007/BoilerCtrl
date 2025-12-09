@@ -46,7 +46,7 @@ def _normalize_row_keys(row: Dict[str, Any]) -> Dict[str, Any]:
     """
     if not row:
         return row
-    
+
     # Mapping of lowercase keys to expected PascalCase
     key_map = {
         "zonename": "ZoneName",
@@ -60,13 +60,13 @@ def _normalize_row_keys(row: Dict[str, Any]) -> Dict[str, Any]:
         "setpointoverridemode": "SetpointOverrideMode",
         "setpointoverrideuntil": "SetpointOverrideUntil",
     }
-    
+
     normalized = {}
     for key, value in row.items():
         # Use the mapped key if it exists, otherwise keep original
         normalized_key = key_map.get(key.lower(), key)
         normalized[normalized_key] = value
-    
+
     return normalized
 
 

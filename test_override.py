@@ -21,10 +21,10 @@ except ImportError as e:
 def test_override_modes():
     print("Testing Setpoint Override System\n")
     print("=" * 60)
-    
+
     # Test Zone
     zone_name = "Z1"
-    
+
     # 1. Test Boundary Mode (default)
     print("\n1. Testing BOUNDARY mode...")
     repositories.update_zone_status(
@@ -33,14 +33,14 @@ def test_override_modes():
         setpoint_override_at=datetime.now(),
         setpoint_override_mode="boundary",
     )
-    
+
     zone = repositories.get_zone_status(zone_name)
     zone = _normalize_row_keys(zone)
     print(f"   Setpoint: {zone['TargetSetpoint_F']}°F")
     print(f"   Override Mode: {zone['SetpointOverrideMode']}")
     print(f"   Override At: {zone['SetpointOverrideAt']}")
     print(f"   ✓ Boundary mode set successfully")
-    
+
     # 2. Test Permanent Mode
     print("\n2. Testing PERMANENT mode...")
     repositories.update_zone_status(
@@ -49,13 +49,13 @@ def test_override_modes():
         setpoint_override_at=datetime.now(),
         setpoint_override_mode="permanent",
     )
-    
+
     zone = repositories.get_zone_status(zone_name)
     zone = _normalize_row_keys(zone)
     print(f"   Setpoint: {zone['TargetSetpoint_F']}°F")
     print(f"   Override Mode: {zone['SetpointOverrideMode']}")
     print(f"   ✓ Permanent mode set successfully")
-    
+
     # 3. Test Timed Mode
     print("\n3. Testing TIMED mode...")
     future_time = datetime.now() + timedelta(hours=2)
@@ -66,28 +66,28 @@ def test_override_modes():
         setpoint_override_mode="timed",
         setpoint_override_until=future_time,
     )
-    
+
     zone = repositories.get_zone_status(zone_name)
     zone = _normalize_row_keys(zone)
     print(f"   Setpoint: {zone['TargetSetpoint_F']}°F")
     print(f"   Override Mode: {zone['SetpointOverrideMode']}")
     print(f"   Override Until: {zone['SetpointOverrideUntil']}")
     print(f"   ✓ Timed mode set successfully")
-    
+
     # 4. Test Clear Override
     print("\n4. Testing CLEAR override...")
     repositories.update_zone_status(
         zone_name,
         clear_override=True,
     )
-    
+
     zone = repositories.get_zone_status(zone_name)
     zone = _normalize_row_keys(zone)
     print(f"   Override Mode: {zone['SetpointOverrideMode']}")
     print(f"   Override At: {zone['SetpointOverrideAt']}")
     print(f"   Override Until: {zone['SetpointOverrideUntil']}")
     print(f"   ✓ Override cleared successfully")
-    
+
     print("\n" + "=" * 60)
     print("All tests passed! ✓\n")
 

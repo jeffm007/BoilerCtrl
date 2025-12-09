@@ -2263,10 +2263,10 @@ if (zonesTableElement) {
           console.log(`[Setpoint] Updating cache with direct data, setpoint=${updated.TargetSetpoint_F || updated.target_setpoint_f}`);
           updateZonesCache({ zones: [updated] });
         }
-        // Clear the "just saved" flag after 3 seconds
+        // Clear the "just saved" flag after 25 seconds (longer than poll interval of 20s)
         setTimeout(() => {
           input.dataset.justSaved = 'false';
-        }, 3000);
+        }, 25000);
       } catch (error) {
         console.error("Failed to update setpoint", error);
         input.dataset.justSaved = 'false';
