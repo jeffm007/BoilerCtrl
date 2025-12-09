@@ -10,6 +10,10 @@ from typing import Dict, List
 import json
 import os
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 
 # Default number of heating zones. Can be overridden via env variable.
 DEFAULT_ZONE_COUNT = 14
