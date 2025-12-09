@@ -357,10 +357,10 @@ def replace_zone_schedule(
     ]
 
     with get_connection() as conn:
-        conn.execute("DELETE FROM ZoneSchedules WHERE ZoneName = ?;", (zone_name,))
+        _execute_query(conn, "DELETE FROM ZoneSchedules WHERE ZoneName = ?;", (zone_name,))
         if normalized_entries:
-            conn.executemany(
-                """
+            cursor = conn.cursor() if settings.database_type == "postgresql" else conn
+            query = """
                 INSERT INTO ZoneSchedules (
                     ZoneName,
                     DayOfWeek,
@@ -370,19 +370,22 @@ def replace_zone_schedule(
                     Enabled
                 )
                 VALUES (?, ?, ?, ?, ?, ?);
-                """,
-                [
-                    (
-                        zone_name,
-                        entry["DayOfWeek"],
-                        entry["StartTime"],
-                        entry["EndTime"],
-                        entry["Setpoint_F"],
-                        entry["Enabled"],
-                    )
-                    for entry in normalized_entries
-                ],
-            )
+                """
+            if settings.database_type == "postgresql":
+                query = query.replace("?", "%s")
+            
+            data = [
+                (
+                    zone_name,
+                    entry["DayOfWeek"],
+                    entry["StartTime"],
+                    entry["EndTime"],
+                    entry["Setpoint_F"],
+                    entry["Enabled"],
+                )
+                for entry in normalized_entries
+            ]
+            cursor.executemany(query, data)
         conn.commit()
 
 
