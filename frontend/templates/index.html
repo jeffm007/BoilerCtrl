@@ -97,6 +97,57 @@
     </div>
   </section>
 
+  <!-- Setpoint Override Modal -->
+  <div id="overrideModal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>Setpoint Override Options</h3>
+        <button class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p>Zone: <strong id="overrideZoneName"></strong></p>
+        <p>New Setpoint: <strong id="overrideSetpoint"></strong>°F</p>
+        
+        <div class="override-options">
+          <label class="override-option">
+            <input type="radio" name="overrideMode" value="boundary" checked>
+            <div>
+              <strong>Until Next Schedule</strong>
+              <small>Override until the next scheduled setpoint change</small>
+            </div>
+          </label>
+          
+          <label class="override-option">
+            <input type="radio" name="overrideMode" value="permanent">
+            <div>
+              <strong>Permanent Override</strong>
+              <small>Keep this setpoint until manually changed</small>
+            </div>
+          </label>
+          
+          <label class="override-option">
+            <input type="radio" name="overrideMode" value="timed">
+            <div>
+              <strong>Until Specific Time</strong>
+              <small>Override until a specific date/time</small>
+            </div>
+          </label>
+          
+          <div id="timedOptions" style="display: none; margin-left: 2rem;">
+            <label>
+              Until:
+              <input type="datetime-local" id="overrideUntil">
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="overrideCancel" class="btn-secondary">Cancel</button>
+        <button id="overrideConfirm" class="btn-primary">Save Override</button>
+      </div>
+    </div>
+  </div>
+
 {% endblock %}
 
 {% block scripts %}

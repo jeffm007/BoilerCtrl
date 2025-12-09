@@ -2223,6 +2223,109 @@ if (copyDaySourceSelect && copyDayTargetSelect) {
   });
 }
 
+// Override Modal Functions
+function showOverrideModal(zoneName, setpoint, onConfirm) {
+  const modal = document.getElementById('overrideModal');
+  const zoneNameEl = document.getElementById('overrideZoneName');
+  const setpointEl = document.getElementById('overrideSetpoint');
+  const timedOptions = document.getElementById('timedOptions');
+  const untilInput = document.getElementById('overrideUntil');
+  const confirmBtn = document.getElementById('overrideConfirm');
+  const cancelBtn = document.getElementById('overrideCancel');
+  const closeBtn = modal.querySelector('.modal-close');
+  
+  // Set default datetime to 2 hours from now
+  const defaultUntil = new Date();
+  defaultUntil.setHours(defaultUntil.getHours() + 2);
+  untilInput.value = defaultUntil.toISOString().slice(0, 16);
+  
+  zoneNameEl.textContent = zoneName;
+  setpointEl.textContent = setpoint.toFixed(1);
+  modal.style.display = 'flex';
+  
+  // Handle timed mode radio selection
+  const radios = modal.querySelectorAll('input[name="overrideMode"]');
+  radios.forEach(radio => {
+    radio.addEventListener('change', () => {
+      timedOptions.style.display = radio.value === 'timed' ? 'block' : 'none';
+    });
+  });
+  
+  // Close handlers
+  const closeModal = () => {
+    modal.style.display = 'none';
+    radios.forEach(radio => radio.removeEventListener('change', () => {}));
+  };
+  
+  closeBtn.onclick = closeModal;
+  cancelBtn.onclick = closeModal;
+  modal.onclick = (e) => {
+    if (e.target === modal) closeModal();
+  };
+  
+  // Confirm handler
+  confirmBtn.onclick = () => {
+    const selectedMode = modal.querySelector('input[name="overrideMode"]:checked').value;
+    const overrideData = {
+      override_mode: selectedMode
+    };
+    
+    if (selectedMode === 'timed') {
+      const untilValue = untilInput.value;
+      if (!untilValue) {
+        alert('Please select a date and time for the override');
+        return;
+      }
+      overrideData.override_until = new Date(untilValue).toISOString();
+    }
+    
+    closeModal();
+    onConfirm(overrideData);
+  };
+}
+
+async function saveSetpoint(setpointBtn, row, zoneName, value, input, overrideData = null) {
+  try {
+    setpointBtn.disabled = true;
+    setpointBtn.classList.add("loading");
+    input.dataset.justSaved = 'true';
+    
+    const payload = { target_setpoint_f: value };
+    if (overrideData) {
+      payload.override_mode = overrideData.override_mode;
+      if (overrideData.override_until) {
+        payload.override_until = overrideData.override_until;
+      }
+    }
+    
+    console.log(`[Setpoint] Saving ${zoneName} setpoint: ${value}`, overrideData || '(no override)');
+    const updated = await fetchJson(`${API_BASE}/zones/${zoneName}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    console.log(`[Setpoint] Response received:`, updated);
+    
+    if (updated && updated.zone) {
+      console.log(`[Setpoint] Updating cache with zone data, setpoint=${updated.zone.TargetSetpoint_F || updated.zone.target_setpoint_f}`);
+      updateZonesCache({ zones: [updated.zone] });
+    } else {
+      console.log(`[Setpoint] Updating cache with direct data, setpoint=${updated.TargetSetpoint_F || updated.target_setpoint_f}`);
+      updateZonesCache({ zones: [updated] });
+    }
+    
+    setTimeout(() => {
+      input.dataset.justSaved = 'false';
+    }, 25000);
+  } catch (error) {
+    console.error("Failed to update setpoint", error);
+    input.dataset.justSaved = 'false';
+  } finally {
+    setpointBtn.classList.remove("loading");
+    setpointBtn.disabled = false;
+  }
+}
+
 // Delegate button clicks so each row can trigger FORCE_ON/OFF/AUTO.
 // Re-select zonesTable in case it wasn't available when module loaded
 const zonesTableElement = zonesTable || document.querySelector("#zonesTable tbody");
@@ -2242,37 +2345,18 @@ if (zonesTableElement) {
         return;
       }
 
-      try {
-        setpointBtn.disabled = true;
-        setpointBtn.classList.add("loading");
-        // Mark the input as "just saved" to prevent overwriting by polling
-        input.dataset.justSaved = 'true';
-        console.log(`[Setpoint] Saving ${zoneName} setpoint: ${value}`);
-        const updated = await fetchJson(`${API_BASE}/zones/${zoneName}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ target_setpoint_f: value }),
+      // Check if zone is in AUTO mode - if so, show override modal
+      const modeCell = row.querySelector(".mode");
+      const currentMode = modeCell ? modeCell.textContent.trim() : "";
+      
+      if (currentMode === "AUTO") {
+        // Show override modal
+        showOverrideModal(zoneName, value, async (overrideData) => {
+          await saveSetpoint(setpointBtn, row, zoneName, value, input, overrideData);
         });
-        console.log(`[Setpoint] Response received:`, updated);
-        // Don't call updateZoneRow - just update the cache
-        // This prevents the input field from being overwritten
-        if (updated && updated.zone) {
-          console.log(`[Setpoint] Updating cache with zone data, setpoint=${updated.zone.TargetSetpoint_F || updated.zone.target_setpoint_f}`);
-          updateZonesCache({ zones: [updated.zone] });
-        } else {
-          console.log(`[Setpoint] Updating cache with direct data, setpoint=${updated.TargetSetpoint_F || updated.target_setpoint_f}`);
-          updateZonesCache({ zones: [updated] });
-        }
-        // Clear the "just saved" flag after 25 seconds (longer than poll interval of 20s)
-        setTimeout(() => {
-          input.dataset.justSaved = 'false';
-        }, 25000);
-      } catch (error) {
-        console.error("Failed to update setpoint", error);
-        input.dataset.justSaved = 'false';
-      } finally {
-        setpointBtn.classList.remove("loading");
-        setpointBtn.disabled = false;
+      } else {
+        // Direct save for non-AUTO modes
+        await saveSetpoint(setpointBtn, row, zoneName, value, input);
       }
       return;
     }
