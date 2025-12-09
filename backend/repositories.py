@@ -394,7 +394,8 @@ def list_all_schedules() -> List[Dict[str, Any]]:
     Fetch schedule entries for every zone (used for previews).
     """
     with get_connection() as conn:
-        rows = conn.execute(
+        cursor = _execute_query(
+            conn,
             """
             SELECT
                 Id,
@@ -409,13 +410,15 @@ def list_all_schedules() -> List[Dict[str, Any]]:
             FROM ZoneSchedules
             ORDER BY ZoneName ASC, DayOfWeek ASC, StartTime ASC;
             """
-        ).fetchall()
+        )
+        rows = cursor.fetchall()
     return rows
 
 
 def list_global_schedule() -> List[Dict[str, Any]]:
     with get_connection() as conn:
-        rows = conn.execute(
+        cursor = _execute_query(
+            conn,
             """
             SELECT
                 Id,
@@ -429,7 +432,8 @@ def list_global_schedule() -> List[Dict[str, Any]]:
             FROM GlobalSchedule
             ORDER BY DayOfWeek ASC, StartTime ASC;
             """
-        ).fetchall()
+        )
+        rows = cursor.fetchall()
     return rows
 
 
@@ -446,7 +450,7 @@ def replace_global_schedule(entries: Sequence[Dict[str, Any]]) -> None:
     ]
 
     with get_connection() as conn:
-        conn.execute("DELETE FROM GlobalSchedule;")
+        _execute_query(conn, "DELETE FROM GlobalSchedule;")
         if normalized_entries:
             conn.executemany(
                 """
@@ -475,29 +479,34 @@ def replace_global_schedule(entries: Sequence[Dict[str, Any]]) -> None:
 
 def list_presets() -> List[Dict[str, Any]]:
     with get_connection() as conn:
-        rows = conn.execute(
+        cursor = _execute_query(
+            conn,
             """
             SELECT Id, Name, Description, CreatedAt, UpdatedAt
             FROM SchedulePresets
             ORDER BY Name COLLATE NOCASE ASC;
             """
-        ).fetchall()
+        )
+        rows = cursor.fetchall()
     return rows
 
 
 def get_preset_with_entries(preset_id: int) -> Optional[Dict[str, Any]]:
     with get_connection() as conn:
-        preset = conn.execute(
+        cursor = _execute_query(
+            conn,
             """
             SELECT Id, Name, Description, CreatedAt, UpdatedAt
             FROM SchedulePresets
             WHERE Id = ?;
             """,
             (preset_id,),
-        ).fetchone()
+        )
+        preset = cursor.fetchone()
         if not preset:
             return None
-        entries = conn.execute(
+        cursor = _execute_query(
+            conn,
             """
             SELECT
                 Id,
@@ -537,7 +546,8 @@ def create_preset(
 
     with get_connection() as conn:
         try:
-            cursor = conn.execute(
+            cursor = _execute_query(
+                conn,
                 "INSERT INTO SchedulePresets (Name, Description) VALUES (?, ?);",
                 (name, description),
             )
@@ -598,7 +608,8 @@ def update_preset_metadata(
     params.append(preset_id)
     with get_connection() as conn:
         try:
-            conn.execute(
+            _execute_query(
+                conn,
                 f"UPDATE SchedulePresets SET {', '.join(assignments)} WHERE Id = ?;",
                 params,
             )
@@ -622,7 +633,7 @@ def replace_preset_entries(
     ]
 
     with get_connection() as conn:
-        conn.execute("DELETE FROM SchedulePresetEntries WHERE PresetId = ?;", (preset_id,))
+        _execute_query(conn, "DELETE FROM SchedulePresetEntries WHERE PresetId = ?;", (preset_id,))
         if normalized_entries:
             conn.executemany(
                 """
@@ -648,7 +659,8 @@ def replace_preset_entries(
                     for entry in normalized_entries
                 ],
             )
-        conn.execute(
+        _execute_query(
+            conn,
             "UPDATE SchedulePresets SET UpdatedAt = CURRENT_TIMESTAMP WHERE Id = ?;",
             (preset_id,),
         )
@@ -657,5 +669,5 @@ def replace_preset_entries(
 
 def delete_preset(preset_id: int) -> None:
     with get_connection() as conn:
-        conn.execute("DELETE FROM SchedulePresets WHERE Id = ?;", (preset_id,))
+        _execute_query(conn, "DELETE FROM SchedulePresets WHERE Id = ?;", (preset_id,))
         conn.commit()
