@@ -130,7 +130,8 @@ def list_all_zone_rows() -> List[Dict[str, Any]]:
     Fetch status for every zone, including the boiler row.
     """
     with get_connection() as conn:
-        rows = conn.execute(
+        cursor = _execute_query(
+            conn,
             """
             SELECT *
             FROM ZoneStatus
@@ -139,7 +140,8 @@ def list_all_zone_rows() -> List[Dict[str, Any]]:
                 ELSE CAST(SUBSTR(ZoneName, 2) AS INTEGER)
             END
             """
-        ).fetchall()
+        )
+        rows = cursor.fetchall()
     return rows
 
 
