@@ -1,5 +1,5 @@
-// VERSION: 4.0 - Setpoint debugging
-console.log("🔧 App.js loaded - VERSION 4.0");
+// VERSION: 5.0 - Fixed avg runtime calculation
+console.log("🔧 App.js loaded - VERSION 5.0");
 const API_BASE = "/api";
 const DEFAULT_TIME_ZONE = "America/Denver";
 
@@ -2704,7 +2704,7 @@ function renderZoneChart(samplePoints, runEvents, zoneName, options = {}, contex
     }
     return {
       timeMs: baseTime,
-      value: bucket.sum / bucket.count / 60,
+      value: bucket.sum / 60,  // Total runtime in minutes for this time bucket
     };
   });
   const runValues = runPoints
