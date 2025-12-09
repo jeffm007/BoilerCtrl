@@ -963,6 +963,10 @@ class ZoneService:
         row["RoomName"] = settings.zone_room_map.get(
             row.get("ZoneName", ""), row.get("ZoneName")
         )
+        # Convert datetime objects to ISO format strings for PostgreSQL compatibility
+        updated_at = row.get("UpdatedAt")
+        if updated_at and hasattr(updated_at, 'isoformat'):
+            row["UpdatedAt"] = updated_at.isoformat()
         date_part, time_part = _split_timestamp(row.get("UpdatedAt"))
         row["UpdatedDate"] = date_part
         row["UpdatedTime"] = time_part
