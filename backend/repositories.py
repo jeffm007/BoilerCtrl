@@ -178,8 +178,10 @@ def update_system_status(
         return
 
     with get_connection() as conn:
-        conn.execute(
-            f"UPDATE SystemStatus SET {', '.join(assignments)} WHERE Id = 1;", params
+        _execute_query(
+            conn,
+            f"UPDATE SystemStatus SET {', '.join(assignments)} WHERE Id = 1;",
+            tuple(params)
         )
         conn.commit()
 
@@ -200,7 +202,8 @@ def record_event(
     only populated when we log the OFF event for a zone cycle.
     """
     with get_connection() as conn:
-        conn.execute(
+        _execute_query(
+            conn,
             """
             INSERT INTO EventLog (
                 Timestamp,
@@ -221,7 +224,7 @@ def record_event(
                 pipe_temp_f,
                 outside_temp_f,
                 duration_seconds,
-            ),
+            )
         )
         conn.commit()
 
@@ -238,7 +241,8 @@ def record_temperature_sample(
     Persist a periodic temperature snapshot for later analytics.
     """
     with get_connection() as conn:
-        conn.execute(
+        _execute_query(
+            conn,
             """
             INSERT INTO TemperatureSamples (
                 Timestamp,
@@ -312,7 +316,8 @@ def list_zone_schedule(zone_name: str) -> List[Dict[str, Any]]:
     Return schedule entries for a zone ordered by day/time.
     """
     with get_connection() as conn:
-        rows = conn.execute(
+        cursor = _execute_query(
+            conn,
             """
             SELECT
                 Id,
@@ -327,9 +332,10 @@ def list_zone_schedule(zone_name: str) -> List[Dict[str, Any]]:
             FROM ZoneSchedules
             WHERE ZoneName = ?
             ORDER BY DayOfWeek ASC, StartTime ASC;
-            """,
-            (zone_name,),
-        ).fetchall()
+            \"\"\",
+            (zone_name,)
+        )
+        rows = cursor.fetchall()
     return rows
 
 
