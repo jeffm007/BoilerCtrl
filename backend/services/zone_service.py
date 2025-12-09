@@ -84,6 +84,11 @@ def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
 def _split_timestamp(value: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if not value:
         return None, None
+    # Handle datetime objects from PostgreSQL
+    if hasattr(value, 'isoformat'):
+        value = value.isoformat()
+    # Convert to string if it's not already
+    value = str(value)
     normalized = value.replace(" ", "T")
     parts = normalized.split("T")
     date_part = parts[0] if parts else None
