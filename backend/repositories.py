@@ -150,9 +150,11 @@ def get_system_status() -> Dict[str, Any]:
     Return the single SystemStatus row with outdoor temperature metadata.
     """
     with get_connection() as conn:
-        row = conn.execute(
+        cursor = _execute_query(
+            conn,
             "SELECT OutsideTemp_F, UpdatedAt FROM SystemStatus WHERE Id = 1;"
-        ).fetchone()
+        )
+        row = cursor.fetchone()
     return row
 
 
