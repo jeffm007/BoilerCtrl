@@ -4,10 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/boiler-controller/pi-controller
-Environment="PATH=/home/pi/boiler-controller/.venv/bin"
-ExecStart=/home/pi/boiler-controller/.venv/bin/python main.py
+User=jeffm007
+WorkingDirectory=/home/jeffm007/boiler_controller/BoilerCtrl/pi-controller
+Environment="PATH=/home/jeffm007/boiler_controller/BoilerCtrl/.venv/bin"
+ExecStart=/home/jeffm007/boiler_controller/BoilerCtrl/.venv/bin/python pi_main.py
 Restart=always
 RestartSec=10
 

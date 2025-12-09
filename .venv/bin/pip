@@ -1,6 +1,4 @@
-#!/bin/sh
-'''exec' "/volume2/web/Boiler Controller/.venv/bin/python3" "$0" "$@"
-' '''
+#!/home/jeffm007/boiler_controller/BoilerCtrl/.venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys
