@@ -332,7 +332,7 @@ def list_zone_schedule(zone_name: str) -> List[Dict[str, Any]]:
             FROM ZoneSchedules
             WHERE ZoneName = ?
             ORDER BY DayOfWeek ASC, StartTime ASC;
-            \"\"\",
+            """,
             (zone_name,)
         )
         rows = cursor.fetchall()
@@ -373,7 +373,7 @@ def replace_zone_schedule(
                 """
             if settings.database_type == "postgresql":
                 query = query.replace("?", "%s")
-            
+
             data = [
                 (
                     zone_name,
