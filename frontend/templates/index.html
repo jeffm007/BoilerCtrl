@@ -2,157 +2,165 @@
 {% block title %}Dashboard · Boiler Controller{% endblock %}
 
 {% block content %}
-  <section class="card">
-    <div class="card-header">
-      <h2>Zone Status</h2>
-    </div>
-    <div class="table-wrapper zone-table-wrapper">
-      <table id="zonesTable">
-        <thead>
-          <tr>
-            <th>Zone</th>
-            <th>Room</th>
-            <th>State</th>
-                <th>Room-T</th>
-                <th>Pipe-T</th>
-                <th>Setpoint-T</th>
-                <th>Mode</th>
-                <th>Updated-D</th>
-                <th>Updated-T</th>
-                <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for zone in zones %}
-          {% set base_class = 'boiler-row' if zone.zone_name == 'Boiler' else '' %}
-          {% set state_class = 'state-on' if zone.current_state == 'ON' else '' %}
-          {% set is_special = (zone.zone_name == 'Z14') %}
-          <tr data-zone="{{ zone.zone_name }}" class="{{ (base_class + ' ' + state_class).strip() }}">
-            <td>{{ zone.zone_name }}</td>
-            <td class="room-label">{{ zone.room_name }}</td>
-            <td class="state">{{ zone.current_state }}</td>
-            <td class="room">
-              {% if is_special %}
-              <span class="muted">—</span>
-              {% else %}
-              {{ zone.zone_room_temp_f if zone.zone_room_temp_f is not none else '—' }}
-              {% endif %}
-            </td>
-            <td class="pipe">{{ zone.pipe_temp_f if zone.pipe_temp_f is not none else '—' }}</td>
-            <td class="setpoint">
-              {% if zone.zone_name == 'Boiler' %}
-              <span class="muted">—</span>
-              {% elif is_special %}
-              <span class="muted setpoint-placeholder">—</span>
-              {% else %}
-              <div class="setpoint-control">
-                <input
-                  type="number"
-                  class="setpoint-input"
-                  step="0.5"
-                  min="30"
-                  max="90"
-                  value="{{ '%.1f' % zone.target_setpoint_f if zone.target_setpoint_f is not none else '' }}"
-                  placeholder="—"
-                />
-                <button class="small-btn setpoint-save" type="button">Save</button>
-              </div>
-              {% endif %}
-            </td>
-            <td class="mode">{{ zone.control_mode }}</td>
-            {% set timestamp = zone.updated_at if zone.updated_at is not none else zone.updatedAt if zone.updatedAt is not none else '' %}
-            {% set normalized = timestamp.replace(' ', 'T') %}
-            {% if 'T' in normalized %}
-              {% set parts = normalized.split('T') %}
-              {% set date_part = parts[0] %}
-              {% set time_part = parts[1].replace('Z', '') %}
-              {% if '.' in time_part %}
-                {% set time_part = time_part.split('.')[0] %}
-              {% endif %}
-              <td class="updated-date">{{ date_part }}</td>
-              <td class="updated-time">{{ time_part }}</td>
+<!-- System Status Indicators -->
+<div class="status-indicators">
+  <div class="status-badge" id="piStatus">
+    <span class="status-dot"></span>
+    <span class="status-label">Pi Server</span>
+  </div>
+  <div class="status-badge status-online">
+    <span class="status-dot"></span>
+    <span class="status-label">Dashboard</span>
+  </div>
+</div>
+
+<section class="card">
+  <div class="card-header">
+    <h2>Zone Status</h2>
+  </div>
+  <div class="table-wrapper zone-table-wrapper">
+    <table id="zonesTable">
+      <thead>
+        <tr>
+          <th>Zone</th>
+          <th>Room</th>
+          <th>State</th>
+          <th>Room-T</th>
+          <th>Pipe-T</th>
+          <th>Setpoint-T</th>
+          <th>Mode</th>
+          <th>Updated-D</th>
+          <th>Updated-T</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for zone in zones %}
+        {% set base_class = 'boiler-row' if zone.zone_name == 'Boiler' else '' %}
+        {% set state_class = 'state-on' if zone.current_state == 'ON' else '' %}
+        {% set is_special = (zone.zone_name == 'Z14') %}
+        {% set is_manual_mode = (zone.control_mode in ['MANUAL', 'ON', 'OFF', 'THERMOSTAT']) %}
+        <tr data-zone="{{ zone.zone_name }}" class="{{ (base_class + ' ' + state_class).strip() }}">
+          <td>{{ zone.zone_name }}</td>
+          <td class="room-label">{{ zone.room_name }}</td>
+          <td class="state">{{ zone.current_state }}</td>
+          <td class="room">
+            {% if is_special %}
+            <span class="muted">—</span>
             {% else %}
-              <td class="updated-date">—</td>
-              <td class="updated-time">—</td>
+            {{ zone.zone_room_temp_f if zone.zone_room_temp_f is not none else '—' }}
             {% endif %}
-            <td class="actions">
-              {% if zone.zone_name == 'Boiler' %}
-              <span class="muted">—</span>
-              {% elif is_special %}
+          </td>
+          <td class="pipe">{{ zone.pipe_temp_f if zone.pipe_temp_f is not none else '—' }}</td>
+          <td class="setpoint">
+            {% if zone.zone_name == 'Boiler' %}
+            <span class="muted">—</span>
+            {% elif is_special or is_manual_mode %}
+            <span class="muted setpoint-placeholder">—</span>
+            {% else %}
+            <div class="setpoint-control">
+              <input type="number" class="setpoint-input" step="0.5" min="30" max="90"
+                value="{{ '%.1f' % zone.target_setpoint_f if zone.target_setpoint_f is not none else '' }}"
+                placeholder="—" />
+              <button class="small-btn setpoint-save" type="button">Save</button>
+            </div>
+            {% endif %}
+          </td>
+          <td class="mode">{{ zone.control_mode }}</td>
+          {% set timestamp = zone.updated_at if zone.updated_at is not none else zone.updatedAt if zone.updatedAt is not
+          none else '' %}
+          {% set normalized = timestamp.replace(' ', 'T') %}
+          {% if 'T' in normalized %}
+          {% set parts = normalized.split('T') %}
+          {% set date_part = parts[0] %}
+          {% set time_part = parts[1].replace('Z', '') %}
+          {% if '.' in time_part %}
+          {% set time_part = time_part.split('.')[0] %}
+          {% endif %}
+          <td class="updated-date">{{ date_part }}</td>
+          <td class="updated-time">{{ time_part }}</td>
+          {% else %}
+          <td class="updated-date">—</td>
+          <td class="updated-time">—</td>
+          {% endif %}
+          <td class="actions">
+            {% if zone.zone_name == 'Boiler' %}
+            <span class="muted">—</span>
+            {% elif is_special %}
+            <button class="small-btn action" data-action="FORCE_ON">On</button>
+            <button class="small-btn action" data-action="FORCE_OFF">Off</button>
+            {% else %}
+            <div class="button-group">
+              <button class="small-btn action" data-action="AUTO">Auto</button>
+              <button class="small-btn action" data-action="THERMOSTAT">T-Stat</button>
               <button class="small-btn action" data-action="FORCE_ON">On</button>
               <button class="small-btn action" data-action="FORCE_OFF">Off</button>
-              {% else %}
-              <div class="button-group">
-                <button class="small-btn action" data-action="AUTO">Auto</button>
-                <button class="small-btn action" data-action="THERMOSTAT">T-Stat</button>
-                <button class="small-btn action" data-action="FORCE_ON">On</button>
-                <button class="small-btn action" data-action="FORCE_OFF">Off</button>
-              </div>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </section>
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 
-  <!-- Setpoint Override Modal -->
-  <div id="overrideModal" class="modal" style="display: none;">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h3>Setpoint Override Options</h3>
-        <button class="modal-close">&times;</button>
-      </div>
-      <div class="modal-body">
-        <p>Zone: <strong id="overrideZoneName"></strong></p>
-        <p>New Setpoint: <strong id="overrideSetpoint"></strong>°F</p>
-        
-        <div class="override-options">
-          <label class="override-option">
-            <input type="radio" name="overrideMode" value="boundary" checked>
-            <div>
-              <strong>Until Next Schedule</strong>
-              <small>Override until the next scheduled setpoint change</small>
-            </div>
-          </label>
-          
-          <label class="override-option">
-            <input type="radio" name="overrideMode" value="permanent">
-            <div>
-              <strong>Permanent Override</strong>
-              <small>Keep this setpoint until manually changed</small>
-            </div>
-          </label>
-          
-          <label class="override-option">
-            <input type="radio" name="overrideMode" value="timed">
-            <div>
-              <strong>Until Specific Time</strong>
-              <small>Override until a specific date/time</small>
-            </div>
-          </label>
-          
-          <div id="timedOptions" style="display: none; margin-left: 2rem;">
-            <label>
-              Until:
-              <input type="datetime-local" id="overrideUntil">
-            </label>
+<!-- Setpoint Override Modal -->
+<div id="overrideModal" class="modal" style="display: none;">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Setpoint Override Options</h3>
+      <button class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p>Zone: <strong id="overrideZoneName"></strong></p>
+      <p>New Setpoint: <strong id="overrideSetpoint"></strong>°F</p>
+
+      <div class="override-options">
+        <label class="override-option">
+          <input type="radio" name="overrideMode" value="boundary" checked>
+          <div>
+            <strong>Until Next Schedule</strong>
+            <small>Override until the next scheduled setpoint change</small>
           </div>
+        </label>
+
+        <label class="override-option">
+          <input type="radio" name="overrideMode" value="permanent">
+          <div>
+            <strong>Permanent Override</strong>
+            <small>Keep this setpoint until manually changed</small>
+          </div>
+        </label>
+
+        <label class="override-option">
+          <input type="radio" name="overrideMode" value="timed">
+          <div>
+            <strong>Until Specific Time</strong>
+            <small>Override until a specific date/time</small>
+          </div>
+        </label>
+
+        <div id="timedOptions" style="display: none; margin-left: 2rem;">
+          <label>
+            Until:
+            <input type="datetime-local" id="overrideUntil">
+          </label>
         </div>
       </div>
-      <div class="modal-footer">
-        <button id="overrideCancel" class="btn-secondary">Cancel</button>
-        <button id="overrideConfirm" class="btn-primary">Save Override</button>
-      </div>
+    </div>
+    <div class="modal-footer">
+      <button id="overrideCancel" class="btn-secondary">Cancel</button>
+      <button id="overrideConfirm" class="btn-primary">Save Override</button>
     </div>
   </div>
+</div>
 
 {% endblock %}
 
 {% block scripts %}
-  <script>
-    window.__ZONE_CHOICES__ = {{ zone_choices | tojson }};
-  </script>
-  {{ super() }}
+<script>
+  window.__ZONE_CHOICES__ = {{ zone_choices | tojson }};
+</script>
+{{ super() }}
 {% endblock %}

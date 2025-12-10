@@ -19,6 +19,7 @@ const statsCallsHeader = document.getElementById("statsCallsHeader");
 const statsTotalHeader = document.getElementById("statsTotalHeader");
 const outsideTempEl = document.querySelector("#outsideTemp");
 const systemUpdatedEl = document.querySelector("#systemUpdated");
+const piStatusEl = document.getElementById("piStatus");
 const zoneSelect = document.querySelector("#zoneSelect");
 const daySelect = document.querySelector("#daySelect");
 const chartCanvas = document.getElementById("zoneChart");
@@ -717,8 +718,8 @@ function updateZoneRow(row, zone) {
     const isRecentlyOverridden = recentOverrideTime && (Date.now() - recentOverrideTime) < 30000; // 30 seconds
 
     if (!isActive && !justSaved && !isRecentlyOverridden) {
-      // Show '-' if not in AUTO or THERMOSTAT mode
-      if (controlMode !== "AUTO" && controlMode !== "THERMOSTAT") {
+      // Show '-' if not in AUTO mode (THERMOSTAT, MANUAL, ON, OFF should all show dash)
+      if (controlMode !== "AUTO") {
         setpointInput.value = "";
         setpointInput.placeholder = "—";
         setpointInput.disabled = true;
@@ -729,7 +730,7 @@ function updateZoneRow(row, zone) {
           saveButton.disabled = true;
         }
       } else {
-        // Enable input for AUTO and THERMOSTAT modes
+        // Enable input only for AUTO mode
         setpointInput.disabled = false;
 
         // Also enable the save button for editable modes
@@ -817,6 +818,7 @@ async function refreshZones() {
     renderZones(zones);
     renderSystemStatusData(system);
     updateZonesCache({ zones, system });
+    updatePiStatus(true);
     if (DASHBOARD_CACHE_DEBUG) {
       console.info("[dashboard] refreshZones() completed", {
         zones: zones.length,
@@ -825,6 +827,20 @@ async function refreshZones() {
     }
   } catch (error) {
     console.error("Failed to refresh zones", error);
+    updatePiStatus(false);
+  }
+}
+
+// Update Pi connection status indicator
+function updatePiStatus(isOnline) {
+  if (!piStatusEl) return;
+  
+  if (isOnline) {
+    piStatusEl.classList.add('status-online');
+    piStatusEl.classList.remove('status-offline');
+  } else {
+    piStatusEl.classList.add('status-offline');
+    piStatusEl.classList.remove('status-online');
   }
 }
 

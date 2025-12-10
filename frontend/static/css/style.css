@@ -56,6 +56,58 @@ body {
   flex-wrap: wrap;
 }
 
+.status-indicators {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  justify-content: center;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: var(--card);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+}
+
+.status-badge.status-online {
+  border-color: var(--success);
+  background: rgba(123, 211, 137, 0.1);
+}
+
+.status-badge.status-offline {
+  border-color: var(--danger);
+  background: rgba(239, 111, 108, 0.1);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: background 0.3s ease;
+}
+
+.status-badge.status-online .status-dot {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.status-badge.status-offline .status-dot {
+  background: var(--danger);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -591,6 +643,7 @@ body {
     height: 40px;
   }
 }
+
 .scheduler-editor button {
   border: none;
   background: rgba(255, 255, 255, 0.1);
@@ -815,6 +868,7 @@ tbody tr[data-state="OFF"] td.state {
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
@@ -839,7 +893,7 @@ tbody tr[data-state="OFF"] td.state {
     font-size: 1.3rem;
   }
 }
- 
+
 
 @media (max-width: 900px) {
   th,
@@ -886,7 +940,7 @@ tbody tr[data-state="OFF"] td.state {
   */
 
 .setpoint-input {
- /* width: 54px; */
+  /* width: 54px; */
   padding: 0.28rem 0.35rem;
   border-radius: 6px;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -1242,6 +1296,7 @@ footer {
 .icon-btn:hover {
   color: var(--text);
 }
+
 .scheduler-editor .temp-controls input[type="range"]::-webkit-slider-runnable-track {
   background: rgba(255, 255, 255, 0.3);
   width: 6px;
@@ -1269,6 +1324,7 @@ footer {
   border-radius: 50%;
   background: var(--accent);
 }
+
 #zonesTable th:first-child,
 #zonesTable td:first-child {
   min-width: var(--zone-col-zone);
@@ -1410,7 +1466,7 @@ footer {
   cursor: pointer;
 }
 
-.override-option input[type="radio"]:checked + div strong {
+.override-option input[type="radio"]:checked+div strong {
   color: var(--accent);
 }
 
@@ -1458,7 +1514,8 @@ footer {
   justify-content: flex-end;
 }
 
-.btn-primary, .btn-secondary {
+.btn-primary,
+.btn-secondary {
   padding: 0.5rem 1.5rem;
   border-radius: 4px;
   border: none;
