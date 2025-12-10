@@ -1,10 +1,10 @@
 # Boiler Controller Web Server
 
-**Remote PostgreSQL Development Setup - Active!** ✅
+**SQLite Database - Production Ready!** ✅
 
 This repository contains a FastAPI-based web server for monitoring and controlling a 14‑zone hydronic boiler system that reports the following signals:
 
-- Zone `Call for Heat` state (detected via optically isolated 24 VAC inputs).
+- Zone `Call for Heat` state (detected via optically isolated 24 VAC inputs).
 - Room temperature for each zone.
 - Supply pipe temperature for each zone.
 - Boiler firing (burner) state.
@@ -86,79 +86,14 @@ requirements.txt       # Python dependencies
    - Dashboard UI: <http://localhost:8000/>
    - Interactive API docs: <http://localhost:8000/docs>
 
-### Remote PostgreSQL Setup (for Pi + OpenVPN)
-
-To access your Pi's database remotely over OpenVPN:
-
-#### On the Raspberry Pi:
-
-1. **Run the PostgreSQL setup script**
-
-   ```bash
-   cd ~/BoilerCtrl
-   chmod +x scripts/setup_postgres_pi.sh
-   ./scripts/setup_postgres_pi.sh
-   ```
-
-   This will:
-   - Install PostgreSQL
-   - Create database and user
-   - Configure remote access over VPN
-   - Generate connection strings
-
-2. **Initialize the database schema**
-
-   ```bash
-   source ~/.boiler_controller.env
-   python -m backend.database
-   ```
-
-3. **Start the controller service** (with PostgreSQL)
-
-   ```bash
-   source ~/.boiler_controller.env
-   uvicorn backend.main:app --host 0.0.0.0 --port 8001
-   ```
-
-#### On your Windows machine:
-
-1. **Create a `.env` file** in the project root:
-
-   ```env
-   DATABASE_URL=postgresql://boiler_user:your_password@10.8.0.2:5432/boiler_controller
-   ```
-
-   Replace `10.8.0.2` with your Pi's VPN IP address.
-
-2. **Install dependencies** (if not already installed):
-
-   ```pwsh
-   pip install -r requirements.txt
-   ```
-
-3. **Connect to the remote database**
-
-   Your application will now connect to the PostgreSQL database on your Pi over the VPN.
-
-#### Testing the connection:
-
-```bash
-# From Windows (via VPN)
-psql -h 10.8.0.2 -U boiler_user -d boiler_controller
-
-# From Pi (local)
-psql -U boiler_user -d boiler_controller
-```
-
 ### Database Configuration
 
-The application automatically detects which database to use:
+The application uses **SQLite** as its database:
 
-- **SQLite** (default): If no `DATABASE_URL` is set, uses local SQLite file at `data/boiler_controller.sqlite3`
-- **PostgreSQL**: If `DATABASE_URL` is set (e.g., `postgresql://user:pass@host:5432/dbname`), connects to PostgreSQL
+- **Default location**: `data/boiler_controller.sqlite3` in the project directory
+- **Override path**: Set the `BOILER_DB_PATH` environment variable to use a custom location
 
-You can override the SQLite path with `BOILER_DB_PATH` environment variable.
-
+The database is automatically initialized when the application starts. All timestamps are stored in UTC and converted to local time in the UI.
 
    ## Linting & Formatting
 
@@ -219,12 +154,13 @@ class PigpioHardwareController(BaseHardwareController):
 
 ## Data Model Overview
 
-The application supports both **SQLite** and **PostgreSQL** databases:
+The application uses **SQLite** as its database:
 
-- **SQLite**: Lightweight, file-based database for local development and single-Pi deployments
-- **PostgreSQL**: Network database for remote access over VPN or distributed setups
+- **SQLite**: Lightweight, file-based database for local and production deployments
+- **Location**: `data/boiler_controller.sqlite3` (configurable via `BOILER_DB_PATH`)
+- **Timestamps**: All stored in UTC and converted to local time in the UI
 
-Schema is identical across both databases:
+Schema structure:
 
 - `ZoneStatus`: one row per zone storing the latest state, temperatures, setpoint, and control mode.
 - `SystemStatus`: single-row table for system-wide metrics such as outdoor temperature.

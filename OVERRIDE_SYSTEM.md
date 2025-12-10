@@ -91,7 +91,6 @@ The system checks active overrides in this order:
 - `backend/services/zone_service.py`: Enhanced business logic
   - `update_zone()`: Detects AUTO mode, parses override parameters
   - `_sync_auto_setpoint()`: Implements three-mode override logic
-  - `_normalize_row_keys()`: Handles PostgreSQL lowercase column names
 
 ### API Layer
 - `backend/schemas.py`: Updated request models
@@ -107,7 +106,6 @@ python -m backend.database
 This will:
 - Add `SetpointOverrideMode` column to ZoneStatus table
 - Add `SetpointOverrideUntil` column to ZoneStatus table
-- Work for both SQLite and PostgreSQL databases
 
 ## Frontend Integration (TODO)
 
