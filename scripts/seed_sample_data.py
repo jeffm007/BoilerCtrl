@@ -53,6 +53,51 @@ def seed_zone_status(randomizer: Random) -> None:
     )
 
 
+def seed_temperature_samples(randomizer: Random) -> None:
+    """
+    Generate historical temperature samples for graphs.
+    Creates samples every 5 minutes for the last 48 hours.
+    """
+    now = datetime.utcnow()
+    start_time = now - timedelta(hours=48)
+
+    # Sample every 5 minutes
+    current_time = start_time
+    sample_count = 0
+
+    while current_time <= now:
+        outside_temp = 28.0 + randomizer.uniform(-5.0, 5.0)
+
+        for index, zone_name in enumerate(settings.zone_names, start=1):
+            # Simulate zones turning on/off throughout the day
+            # Some zones warmer than others
+            base_room_temp = 66.0 + (index % 4) * 1.0
+            room_temp = base_room_temp + randomizer.uniform(-1.5, 1.5)
+
+            # Pipe temp varies based on whether zone is "on" in this time slice
+            # Use time-based pattern so some zones are on at different times
+            hour_of_day = current_time.hour
+            is_heating = (hour_of_day + index) % 6 < 3  # Roughly half the time
+
+            if is_heating:
+                pipe_temp = 115.0 + randomizer.uniform(-5.0, 10.0)
+            else:
+                pipe_temp = 95.0 + randomizer.uniform(-3.0, 3.0)
+
+            repositories.record_temperature_sample(
+                zone_name=zone_name,
+                room_temp_f=round(room_temp, 1),
+                pipe_temp_f=round(pipe_temp, 1),
+                outside_temp_f=round(outside_temp, 1),
+                timestamp=current_time,
+            )
+
+        sample_count += 1
+        current_time += timedelta(minutes=5)
+
+    print(f"Created {sample_count} temperature samples per zone ({sample_count * len(settings.zone_names)} total)")
+
+
 def seed_event_log(randomizer: Random) -> None:
     """
     Generate synthetic ON/OFF cycles for each zone and the boiler.
@@ -126,6 +171,7 @@ def main() -> None:
 
     seed_zone_status(randomizer)
     seed_event_log(randomizer)
+    seed_temperature_samples(randomizer)
     print("Sample data inserted.")
 
 

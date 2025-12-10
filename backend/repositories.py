@@ -1,5 +1,5 @@
 """
-Data access layer for SQLite and PostgreSQL.
+Data access layer for SQLite.
 """
 
 from __future__ import annotations
@@ -7,25 +7,39 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
 import sqlite3
+import logging
 
 from .database import get_connection
 from .config import settings
 
+logger = logging.getLogger(__name__)
 
-def _execute_query(conn: Any, query: str, params: tuple = ()) -> Any:
+
+def _execute_query(conn: sqlite3.Connection, query: str, params: tuple = ()) -> sqlite3.Cursor:
     """
-    Execute a query with parameters, handling both SQLite and PostgreSQL.
-    For PostgreSQL, converts ? placeholders to %s.
+    Execute a query with parameters on SQLite connection.
     """
-    if settings.database_type == "postgresql":
-        # Convert ? placeholders to %s for PostgreSQL
-        pg_query = query.replace("?", "%s")
-        cursor = conn.cursor()
-        cursor.execute(pg_query, params)
-        return cursor
+    return conn.execute(query, params)
+
+
+def _convert_postgresql_row(row, cursor):
+    """Convert PostgreSQL row to match SQLite format with proper field name casing."""
+    if hasattr(row, '_asdict'):  # Named tuple
+        row_dict = row._asdict()
+    elif hasattr(row, 'keys'):  # Dict-like
+        row_dict = dict(row)
     else:
-        # SQLite can execute directly on connection
-        return conn.execute(query, params)
+        # Convert tuple to dict using column names
+        row_dict = {}
+        cursor_description = cursor.description
+        if cursor_description:
+            for i, col_desc in enumerate(cursor_description):
+                col_name = col_desc[0]
+                if i < len(row):
+                    row_dict[col_name] = row[i]
+
+    # SQLite returns proper field names, no conversion needed
+    return row_dict
 
 
 def list_zone_status() -> List[Dict[str, Any]]:
@@ -93,16 +107,20 @@ def update_zone_status(
     if setpoint_override_at is not None:
         assignments.append("SetpointOverrideAt = ?")
         params.append(setpoint_override_at.isoformat())
+        logger.info(f"Setting override_at: {setpoint_override_at.isoformat()}")
     if setpoint_override_mode is not None:
         assignments.append("SetpointOverrideMode = ?")
         params.append(setpoint_override_mode)
+        logger.info(f"Setting override_mode: {setpoint_override_mode}")
     if setpoint_override_until is not None:
         assignments.append("SetpointOverrideUntil = ?")
         params.append(setpoint_override_until.isoformat())
+        logger.info(f"Setting override_until: {setpoint_override_until.isoformat()}")
     if clear_override:
         assignments.append("SetpointOverrideAt = NULL")
         assignments.append("SetpointOverrideMode = NULL")
         assignments.append("SetpointOverrideUntil = NULL")
+        logger.info("Clearing all overrides")
 
     if not assignments:
         # Nothing to update; exit early instead of sending an empty UPDATE statement.
@@ -306,7 +324,8 @@ def fetch_events(
     params.append(limit)
 
     with get_connection() as conn:
-        rows = conn.execute(query, params).fetchall()
+        cursor = _execute_query(conn, query, params)
+        rows = cursor.fetchall()
 
     return rows
 
@@ -336,6 +355,8 @@ def list_zone_schedule(zone_name: str) -> List[Dict[str, Any]]:
             (zone_name,)
         )
         rows = cursor.fetchall()
+
+    # Convert PostgreSQL row format for Pydantic model compatibility
     return rows
 
 
@@ -359,7 +380,7 @@ def replace_zone_schedule(
     with get_connection() as conn:
         _execute_query(conn, "DELETE FROM ZoneSchedules WHERE ZoneName = ?;", (zone_name,))
         if normalized_entries:
-            cursor = conn.cursor() if settings.database_type == "postgresql" else conn
+            cursor = conn.cursor()
             query = """
                 INSERT INTO ZoneSchedules (
                     ZoneName,
@@ -371,8 +392,6 @@ def replace_zone_schedule(
                 )
                 VALUES (?, ?, ?, ?, ?, ?);
                 """
-            if settings.database_type == "postgresql":
-                query = query.replace("?", "%s")
 
             data = [
                 (
@@ -484,10 +503,11 @@ def list_presets() -> List[Dict[str, Any]]:
             """
             SELECT Id, Name, Description, CreatedAt, UpdatedAt
             FROM SchedulePresets
-            ORDER BY Name COLLATE NOCASE ASC;
+            ORDER BY UPPER(Name) ASC;
             """
         )
         rows = cursor.fetchall()
+
     return rows
 
 
@@ -502,9 +522,13 @@ def get_preset_with_entries(preset_id: int) -> Optional[Dict[str, Any]]:
             """,
             (preset_id,),
         )
-        preset = cursor.fetchone()
-        if not preset:
+        preset_row = cursor.fetchone()
+        if not preset_row:
             return None
+
+        # Convert Row to dict
+        preset = dict(preset_row)
+
         cursor = _execute_query(
             conn,
             """
@@ -522,8 +546,9 @@ def get_preset_with_entries(preset_id: int) -> Optional[Dict[str, Any]]:
             ORDER BY DayOfWeek ASC, StartTime ASC;
             """,
             (preset_id,),
-        ).fetchall()
-    preset["Entries"] = entries
+        )
+        entries = cursor.fetchall()
+        preset["Entries"] = [dict(entry) for entry in entries]
     return preset
 
 
@@ -533,16 +558,21 @@ def create_preset(
     description: Optional[str],
     entries: Sequence[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    normalized_entries = [
-        {
-            "DayOfWeek": entry["DayOfWeek"],
-            "StartTime": entry["StartTime"],
-            "EndTime": entry["EndTime"],
-            "Setpoint_F": entry["Setpoint_F"],
-            "Enabled": 1 if entry.get("Enabled", True) else 0,
-        }
-        for entry in entries
-    ]
+    # Entries are already normalized by zone_service._normalize_request_entries
+    # with PascalCase keys. Prepare them for database insertion.
+    try:
+        normalized_entries = [
+            (
+                entry["DayOfWeek"],
+                entry["StartTime"],
+                entry["EndTime"],
+                entry["Setpoint_F"],
+                1 if entry.get("Enabled", True) else 0,
+            )
+            for entry in entries
+        ]
+    except KeyError as e:
+        raise ValueError(f"Missing required field in preset entry: {e}")
 
     with get_connection() as conn:
         try:
@@ -568,17 +598,7 @@ def create_preset(
                 )
                 VALUES (?, ?, ?, ?, ?, ?);
                 """,
-                [
-                    (
-                        preset_id,
-                        entry["DayOfWeek"],
-                        entry["StartTime"],
-                        entry["EndTime"],
-                        entry["Setpoint_F"],
-                        entry["Enabled"],
-                    )
-                    for entry in normalized_entries
-                ],
+                [(preset_id, *entry) for entry in normalized_entries],
             )
         conn.commit()
 

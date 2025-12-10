@@ -41,33 +41,14 @@ logger = logging.getLogger(__name__)
 
 def _normalize_row_keys(row: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Normalize database row keys to Pascal case for consistent access.
-    PostgreSQL returns lowercase column names, SQLite preserves case.
+    Normalize database row keys for consistent access.
+    SQLite preserves case, so this is mostly a pass-through.
     """
     if not row:
         return row
 
-    # Mapping of lowercase keys to expected PascalCase
-    key_map = {
-        "zonename": "ZoneName",
-        "currentstate": "CurrentState",
-        "zoneroomtemp_f": "ZoneRoomTemp_F",
-        "pipetemp_f": "PipeTemp_F",
-        "targetsetpoint_f": "TargetSetpoint_F",
-        "controlmode": "ControlMode",
-        "updatedat": "UpdatedAt",
-        "setpointoverrideat": "SetpointOverrideAt",
-        "setpointoverridemode": "SetpointOverrideMode",
-        "setpointoverrideuntil": "SetpointOverrideUntil",
-    }
-
-    normalized = {}
-    for key, value in row.items():
-        # Use the mapped key if it exists, otherwise keep original
-        normalized_key = key_map.get(key.lower(), key)
-        normalized[normalized_key] = value
-
-    return normalized
+    # SQLite already returns proper case, no mapping needed
+    return row
 
 
 def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
@@ -84,7 +65,7 @@ def _parse_timestamp(value: Optional[str]) -> Optional[datetime]:
 def _split_timestamp(value: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
     if not value:
         return None, None
-    # Handle datetime objects from PostgreSQL
+    # Handle datetime objects
     if hasattr(value, 'isoformat'):
         value = value.isoformat()
     # Convert to string if it's not already
@@ -223,15 +204,19 @@ class ZoneService:
         )
         return [ZoneStatusModel.model_validate(row) for row in processed]
 
-    def get_zone(self, zone_name: str) -> ZoneStatusModel:
+    def get_zone(self, zone_name: str, sync_setpoint: bool = False) -> ZoneStatusModel:
         """
         Fetch a single zone and raise a KeyError if it does not exist.
+        If sync_setpoint is True, apply schedule synchronization logic.
         """
         row = repositories.get_zone_status(zone_name)
         if not row:
             raise KeyError(f"Zone {zone_name} not found")
         normalized = _normalize_row_keys(row)
-        normalized = self._decorate_row(self._sync_auto_setpoint(normalized))
+        if sync_setpoint:
+            normalized = self._decorate_row(self._sync_auto_setpoint(normalized))
+        else:
+            normalized = self._decorate_row(normalized)
         return ZoneStatusModel.model_validate(normalized)
 
     def update_zone(self, zone_name: str, payload: ZoneUpdateRequest) -> ZoneStatusModel:
@@ -246,38 +231,89 @@ class ZoneService:
         # Check if this is a setpoint change in AUTO mode
         if payload.target_setpoint_f is not None:
             current = repositories.get_zone_status(zone_name)
-            if current and current.get("ControlMode") == "AUTO":
+            control_mode = current.get("ControlMode") if current else None
+
+            if current and control_mode == "AUTO":
                 # Mark as manual override with timestamp and mode
                 from datetime import datetime
-                override_mode = payload.override_mode or "boundary"
+                override_mode = getattr(payload, 'override_mode', None) or "permanent"
                 override_until = None
 
                 # Parse override_until if in timed mode
-                if override_mode == "timed" and payload.override_until:
+                if override_mode == "timed" and hasattr(payload, 'override_until') and payload.override_until:
                     try:
                         override_until = datetime.fromisoformat(payload.override_until.replace("Z", "+00:00"))
                     except ValueError:
                         logger.warning(f"Invalid override_until datetime: {payload.override_until}")
                         override_mode = "boundary"  # Fallback to boundary mode
 
+                logger.info(f"Setpoint change in AUTO mode for {zone_name}: {payload.target_setpoint_f}°F with {override_mode} override")
                 repositories.update_zone_status(
                     zone_name,
                     target_setpoint_f=payload.target_setpoint_f,
-                    setpoint_override_at=datetime.now(),
+                    setpoint_override_at=datetime.utcnow(),
                     setpoint_override_mode=override_mode,
                     setpoint_override_until=override_until,
                 )
             else:
+                logger.info(f"Setpoint change for {zone_name}: {payload.target_setpoint_f}°F (mode: {current.get('ControlMode') if current else 'unknown'})")
                 repositories.update_zone_status(
                     zone_name,
                     target_setpoint_f=payload.target_setpoint_f,
                 )
 
         if payload.control_mode is not None:
-            repositories.update_zone_status(
-                zone_name,
-                control_mode=payload.control_mode,
-            )
+            current = repositories.get_zone_status(zone_name)
+            if current:
+                # Handle mode transition boundary conditions
+                current_mode = current.get("ControlMode")
+                new_mode = payload.control_mode
+
+                if current_mode == "AUTO" and new_mode in ["MANUAL", "ON", "OFF"]:
+                    # Transitioning from AUTO to manual mode
+                    # Preserve the current effective setpoint and clear override metadata
+                    current_setpoint = current.get("TargetSetpoint_F")
+                    if current_setpoint is not None:
+                        repositories.update_zone_status(
+                            zone_name,
+                            control_mode=new_mode,
+                            target_setpoint_f=current_setpoint,
+                            clear_override=True,
+                        )
+                    else:
+                        repositories.update_zone_status(
+                            zone_name,
+                            control_mode=new_mode,
+                            clear_override=True,
+                        )
+                elif current_mode in ["MANUAL", "ON", "OFF"] and new_mode == "AUTO":
+                    # Transitioning from manual to AUTO mode
+                    # Set to scheduled setpoint and clear any manual overrides
+                    scheduled_setpoint = self._resolve_scheduled_setpoint(zone_name)
+                    if scheduled_setpoint is not None:
+                        repositories.update_zone_status(
+                            zone_name,
+                            control_mode=new_mode,
+                            target_setpoint_f=scheduled_setpoint,
+                            clear_override=True,
+                        )
+                    else:
+                        repositories.update_zone_status(
+                            zone_name,
+                            control_mode=new_mode,
+                            clear_override=True,
+                        )
+                else:
+                    # No special handling needed for other transitions
+                    repositories.update_zone_status(
+                        zone_name,
+                        control_mode=new_mode,
+                    )
+            else:
+                repositories.update_zone_status(
+                    zone_name,
+                    control_mode=payload.control_mode,
+                )
 
         return self.get_zone(zone_name)
 
@@ -555,13 +591,20 @@ class ZoneService:
     def create_schedule_preset(
         self, payload: SchedulePresetCreateRequest
     ) -> SchedulePresetDetailModel:
-        normalized = self._normalize_request_entries(payload.entries)
-        preset = repositories.create_preset(
-            name=payload.name,
-            description=payload.description,
-            entries=normalized,
-        )
-        return SchedulePresetDetailModel.model_validate(preset)
+        logger.info(f"Creating preset '{payload.name}' with {len(payload.entries)} entries")
+        try:
+            normalized = self._normalize_request_entries(payload.entries)
+            logger.info(f"Normalized entries: {normalized}")
+            preset = repositories.create_preset(
+                name=payload.name,
+                description=payload.description,
+                entries=normalized,
+            )
+            logger.info(f"Preset created successfully with ID: {preset.get('Id')}")
+            return SchedulePresetDetailModel.model_validate(preset)
+        except Exception as e:
+            logger.exception(f"Failed to create preset '{payload.name}'")
+            raise
 
     def update_schedule_preset(
         self, preset_id: int, payload: SchedulePresetUpdateRequest
@@ -853,6 +896,7 @@ class ZoneService:
 
         # Check if there's a manual override active
         if override_at is not None and override_mode is not None:
+            logger.info(f"Found override for {zone_name}: mode={override_mode}, at={override_at}, until={override_until}")
             from datetime import datetime
 
             # Handle 'timed' mode - check if override has expired
@@ -866,8 +910,8 @@ class ZoneService:
                     else:
                         until_time = override_until
 
-                    # Check if override has expired
-                    if datetime.now() >= until_time:
+                    # Check if override has expired (compare UTC times)
+                    if datetime.utcnow() >= until_time:
                         # Override expired, clear it and apply schedule
                         repositories.update_zone_status(zone_name,
                                                        target_setpoint_f=scheduled_setpoint,
@@ -906,6 +950,7 @@ class ZoneService:
 
         # No override or override not applicable, apply schedule as normal
         if current_setpoint is None or abs(current_setpoint - scheduled_setpoint) > 0.05:
+            logger.info(f"Applying scheduled setpoint {scheduled_setpoint} to {zone_name} (was {current_setpoint})")
             repositories.update_zone_status(zone_name, target_setpoint_f=scheduled_setpoint)
             current_setpoint = scheduled_setpoint
 
@@ -963,7 +1008,7 @@ class ZoneService:
         row["RoomName"] = settings.zone_room_map.get(
             row.get("ZoneName", ""), row.get("ZoneName")
         )
-        # Convert datetime objects to ISO format strings for PostgreSQL compatibility
+        # Convert datetime objects to ISO format strings
         updated_at = row.get("UpdatedAt")
         if updated_at and hasattr(updated_at, 'isoformat'):
             row["UpdatedAt"] = updated_at.isoformat()

@@ -3,6 +3,9 @@ console.log("🔧 App.js loaded - VERSION 5.0");
 const API_BASE = "/api";
 const DEFAULT_TIME_ZONE = "America/Denver";
 
+// Track recent overrides to prevent immediate refresh conflicts
+let recentOverrides = new Map(); // zoneName -> timestamp
+
 const zonesTable = document.querySelector("#zonesTable tbody");
 const eventsTableBody = document.querySelector("#eventsTable tbody");
 const statsTableBody = document.querySelector("#zoneStatsTable tbody");
@@ -299,6 +302,30 @@ function formatTime(value) {
   const parts = value.split(":");
   if (parts.length < 2) return value;
   return parts.slice(0, 3).join(":");
+}
+
+// Convert UTC timestamp to local time for display
+function convertUTCToLocal(utcDateStr, utcTimeStr) {
+  if (!utcDateStr || !utcTimeStr) return { date: utcDateStr, time: utcTimeStr };
+
+  try {
+    // Combine date and time, treat as UTC
+    const utcString = `${utcDateStr}T${utcTimeStr}Z`;
+    const utcDate = new Date(utcString);
+
+    if (isNaN(utcDate.getTime())) {
+      return { date: utcDateStr, time: utcTimeStr };
+    }
+
+    // Convert to local time
+    const localDate = utcDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+    const localTime = utcDate.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    return { date: localDate, time: localTime };
+  } catch (e) {
+    console.warn('Error converting UTC to local:', e);
+    return { date: utcDateStr, time: utcTimeStr };
+  }
 }
 
 function normaliseScheduleEntry(entry) {
@@ -644,42 +671,91 @@ function updateZoneRow(row, zone) {
   const zoneName = getProp(zone, "zone_name", "ZoneName", "zoneName");
   const isSpecial = zoneName === "Z14";
 
+  // Store current values as fallback in case new data is incomplete
+  const currentRoomTemp = row.querySelector(".room").textContent;
+  const currentPipeTemp = row.querySelector(".pipe").textContent;
+  const currentSetpoint = row.querySelector(".setpoint-input")?.value;
+  const currentDate = row.querySelector(".updated-date").textContent;
+  const currentTime = row.querySelector(".updated-time").textContent;
+
   const currentState = getProp(zone, "current_state", "CurrentState", "currentState") ?? "—";
   row.dataset.state = currentState;
   row.classList.toggle("state-on", currentState === "ON");
   row.querySelector(".state").textContent = currentState;
 
   const roomName = getProp(zone, "room_name", "RoomName", "roomName");
-  row.querySelector(".room-label").textContent = roomName ?? "—";
+  if (roomName) {
+    row.querySelector(".room-label").textContent = roomName;
+  }
 
   const roomTemp = getProp(zone, "zone_room_temp_f", "ZoneRoomTemp_F", "zoneRoomTempF");
-  row.querySelector(".room").textContent = isSpecial ? "—" : formatTemp(roomTemp);
+  const formattedRoomTemp = isSpecial ? "—" : formatTemp(roomTemp);
+  // Only update if we have valid data or if current shows "—"
+  if (formattedRoomTemp && formattedRoomTemp !== "—" || currentRoomTemp === "—") {
+    row.querySelector(".room").textContent = formattedRoomTemp;
+  }
 
   const pipeTemp = getProp(zone, "pipe_temp_f", "PipeTemp_F", "pipeTempF");
-  row.querySelector(".pipe").textContent = formatTemp(pipeTemp);
+  const formattedPipeTemp = formatTemp(pipeTemp);
+  // Only update if we have valid data or if current shows "—"
+  if (formattedPipeTemp && formattedPipeTemp !== "—" || currentPipeTemp === "—") {
+    row.querySelector(".pipe").textContent = formattedPipeTemp;
+  }
 
   const setpointValue = getProp(zone, "target_setpoint_f", "TargetSetpoint_F", "targetSetpointF");
+  const controlModeRaw = getProp(zone, "control_mode", "ControlMode", "controlMode");
+  const controlMode = controlModeRaw ? String(controlModeRaw).toUpperCase() : "";
   const setpointInput = row.querySelector(".setpoint-input");
+
   if (setpointInput) {
     // Check if user is actively editing OR if this field was just saved
     const isActive = document.activeElement === setpointInput;
     const justSaved = setpointInput.dataset.justSaved === 'true';
 
-    if (!isActive && !justSaved) {
-      // Only update if user isn't actively editing and didn't just save
-      if (setpointValue === null || setpointValue === undefined) {
-        console.log(`[UpdateRow] ${zoneName}: setpoint is null/undefined, clearing input`);
+    // Check if this zone was recently overridden
+    const recentOverrideTime = recentOverrides.get(zoneName);
+    const isRecentlyOverridden = recentOverrideTime && (Date.now() - recentOverrideTime) < 30000; // 30 seconds
+
+    if (!isActive && !justSaved && !isRecentlyOverridden) {
+      // Show '-' if not in AUTO or THERMOSTAT mode
+      if (controlMode !== "AUTO" && controlMode !== "THERMOSTAT") {
         setpointInput.value = "";
         setpointInput.placeholder = "—";
+        setpointInput.disabled = true;
+
+        // Also disable the save button for non-editable modes
+        const saveButton = row.querySelector(".setpoint-save");
+        if (saveButton) {
+          saveButton.disabled = true;
+        }
       } else {
-        const formatted = Number.parseFloat(setpointValue).toFixed(1);
-        console.log(`[UpdateRow] ${zoneName}: setting setpoint input to ${formatted} (from ${setpointValue})`);
-        setpointInput.value = formatted;
+        // Enable input for AUTO and THERMOSTAT modes
+        setpointInput.disabled = false;
+
+        // Also enable the save button for editable modes
+        const saveButton = row.querySelector(".setpoint-save");
+        if (saveButton) {
+          saveButton.disabled = false;
+        }
+
+        // Only update if user isn't actively editing and didn't just save
+        if (setpointValue === null || setpointValue === undefined) {
+          // Only clear if we don't have a current valid value
+          if (!currentSetpoint || currentSetpoint === "" || currentSetpoint === "—") {
+            setpointInput.value = "";
+            setpointInput.placeholder = "—";
+          } else {
+            // Keep the current setpoint value instead of clearing
+          }
+        } else {
+          const formatted = Number.parseFloat(setpointValue).toFixed(1);
+          setpointInput.value = formatted;
+        }
       }
     } else if (justSaved) {
-      console.log(`[UpdateRow] ${zoneName}: skipping update, field was just saved`);
+      // Skip update, field was just saved
     } else {
-      console.log(`[UpdateRow] ${zoneName}: skipping update, field has focus`);
+      // Skip update, field has focus
     }
   }
   const setpointPlaceholder = row.querySelector(".setpoint-placeholder");
@@ -687,8 +763,6 @@ function updateZoneRow(row, zone) {
     setpointPlaceholder.textContent = "—";
   }
 
-  const controlModeRaw = getProp(zone, "control_mode", "ControlMode", "controlMode");
-  const controlMode = controlModeRaw ? String(controlModeRaw).toUpperCase() : "";
   const modeLabel = controlMode === "THERMOSTAT" ? "T-STAT" : controlMode;
   row.querySelector(".mode").textContent = modeLabel || "—";
 
@@ -696,9 +770,20 @@ function updateZoneRow(row, zone) {
   const [fallbackDate, fallbackTime] = splitTimestamp(isoTimestamp);
   const datePart = getProp(zone, "updated_date", "UpdatedDate", "updatedDate") ?? fallbackDate;
   const timePartRaw = getProp(zone, "updated_time", "UpdatedTime", "updatedTime") ?? fallbackTime;
-  row.querySelector(".updated-date").textContent = (datePart && datePart.length ? datePart : fallbackDate) || "—";
-  const finalTime = timePartRaw && timePartRaw.length ? timePartRaw : fallbackTime;
-  row.querySelector(".updated-time").textContent = finalTime ? formatTime(finalTime) : "—";
+
+  // Convert UTC timestamp to local time for display
+  const { date: localDate, time: localTime } = convertUTCToLocal(datePart, timePartRaw);
+
+  // Only update date/time if we have new data or current shows "—"
+  const newDate = localDate || "—";
+  const newTime = localTime ? formatTime(localTime) : "—";
+
+  if (newDate && newDate !== "—" || currentDate === "—") {
+    row.querySelector(".updated-date").textContent = newDate;
+  }
+  if (newTime && newTime !== "—" || currentTime === "—") {
+    row.querySelector(".updated-time").textContent = newTime;
+  }
 
   const onBtn = row.querySelector('button[data-action="FORCE_ON"]');
   const offBtn = row.querySelector('button[data-action="FORCE_OFF"]');
@@ -1462,6 +1547,41 @@ function initializeScheduler() {
     schedulerPresetSaveBtn.addEventListener("click", () => {
       if (!schedulerZoneSelect) return;
       saveCurrentZoneAsPreset(schedulerZoneSelect.value);
+    });
+  }
+
+  const schedulerPresetDeleteBtn = document.getElementById("schedulerPresetDeleteBtn");
+  if (schedulerPresetDeleteBtn) {
+    schedulerPresetDeleteBtn.addEventListener("click", async () => {
+      if (!schedulerPresetSelect || !schedulerPresetSelect.value) {
+        window.alert("Select a preset to delete.");
+        return;
+      }
+      const id = Number.parseInt(schedulerPresetSelect.value, 10);
+      if (Number.isNaN(id)) {
+        window.alert("Invalid preset selection.");
+        return;
+      }
+      const preset = presetsCache.find((p) => (p.Id ?? p.id) === id);
+      const name = preset ? preset.Name ?? preset.name ?? "this preset" : "this preset";
+      const confirmed = window.confirm(`Delete preset "${name}"? This cannot be undone.`);
+      if (!confirmed) {
+        return;
+      }
+      try {
+        const response = await fetch(`${API_BASE}/schedule/presets/${id}`, {
+          method: "DELETE",
+        });
+        if (!response.ok) {
+          const text = await response.text();
+          throw new Error(text || "Failed to delete preset");
+        }
+        await loadSchedulerPresets();
+        window.alert("Preset deleted.");
+      } catch (error) {
+        console.error("Failed to delete preset", error);
+        window.alert("Failed to delete preset: " + (error.message || error));
+      }
     });
   }
 
@@ -2233,16 +2353,16 @@ function showOverrideModal(zoneName, setpoint, onConfirm) {
   const confirmBtn = document.getElementById('overrideConfirm');
   const cancelBtn = document.getElementById('overrideCancel');
   const closeBtn = modal.querySelector('.modal-close');
-  
+
   // Set default datetime to 2 hours from now
   const defaultUntil = new Date();
   defaultUntil.setHours(defaultUntil.getHours() + 2);
   untilInput.value = defaultUntil.toISOString().slice(0, 16);
-  
+
   zoneNameEl.textContent = zoneName;
   setpointEl.textContent = setpoint.toFixed(1);
   modal.style.display = 'flex';
-  
+
   // Handle timed mode radio selection
   const radios = modal.querySelectorAll('input[name="overrideMode"]');
   radios.forEach(radio => {
@@ -2250,26 +2370,26 @@ function showOverrideModal(zoneName, setpoint, onConfirm) {
       timedOptions.style.display = radio.value === 'timed' ? 'block' : 'none';
     });
   });
-  
+
   // Close handlers
   const closeModal = () => {
     modal.style.display = 'none';
-    radios.forEach(radio => radio.removeEventListener('change', () => {}));
+    radios.forEach(radio => radio.removeEventListener('change', () => { }));
   };
-  
+
   closeBtn.onclick = closeModal;
   cancelBtn.onclick = closeModal;
   modal.onclick = (e) => {
     if (e.target === modal) closeModal();
   };
-  
+
   // Confirm handler
   confirmBtn.onclick = () => {
     const selectedMode = modal.querySelector('input[name="overrideMode"]:checked').value;
     const overrideData = {
       override_mode: selectedMode
     };
-    
+
     if (selectedMode === 'timed') {
       const untilValue = untilInput.value;
       if (!untilValue) {
@@ -2278,7 +2398,7 @@ function showOverrideModal(zoneName, setpoint, onConfirm) {
       }
       overrideData.override_until = new Date(untilValue).toISOString();
     }
-    
+
     closeModal();
     onConfirm(overrideData);
   };
@@ -2289,7 +2409,7 @@ async function saveSetpoint(setpointBtn, row, zoneName, value, input, overrideDa
     setpointBtn.disabled = true;
     setpointBtn.classList.add("loading");
     input.dataset.justSaved = 'true';
-    
+
     const payload = { target_setpoint_f: value };
     if (overrideData) {
       payload.override_mode = overrideData.override_mode;
@@ -2297,7 +2417,7 @@ async function saveSetpoint(setpointBtn, row, zoneName, value, input, overrideDa
         payload.override_until = overrideData.override_until;
       }
     }
-    
+
     console.log(`[Setpoint] Saving ${zoneName} setpoint: ${value}`, overrideData || '(no override)');
     const updated = await fetchJson(`${API_BASE}/zones/${zoneName}`, {
       method: "PATCH",
@@ -2305,7 +2425,13 @@ async function saveSetpoint(setpointBtn, row, zoneName, value, input, overrideDa
       body: JSON.stringify(payload),
     });
     console.log(`[Setpoint] Response received:`, updated);
-    
+
+    // Track this override to prevent immediate refresh conflicts
+    if (overrideData) {
+      recentOverrides.set(zoneName, Date.now());
+      console.log(`[Setpoint] Tracking recent override for ${zoneName} to prevent refresh conflicts`);
+    }
+
     if (updated && updated.zone) {
       console.log(`[Setpoint] Updating cache with zone data, setpoint=${updated.zone.TargetSetpoint_F || updated.zone.target_setpoint_f}`);
       updateZonesCache({ zones: [updated.zone] });
@@ -2313,7 +2439,7 @@ async function saveSetpoint(setpointBtn, row, zoneName, value, input, overrideDa
       console.log(`[Setpoint] Updating cache with direct data, setpoint=${updated.TargetSetpoint_F || updated.target_setpoint_f}`);
       updateZonesCache({ zones: [updated] });
     }
-    
+
     setTimeout(() => {
       input.dataset.justSaved = 'false';
     }, 25000);
@@ -2348,14 +2474,18 @@ if (zonesTableElement) {
       // Check if zone is in AUTO mode - if so, show override modal
       const modeCell = row.querySelector(".mode");
       const currentMode = modeCell ? modeCell.textContent.trim() : "";
-      
+
+      console.log(`[Setpoint] Zone ${zoneName} mode check: UI shows '${currentMode}', saving value ${value}`);
+
       if (currentMode === "AUTO") {
-        // Show override modal
+        // Show override modal for zones currently in AUTO mode
+        console.log(`[Setpoint] Showing override modal for AUTO zone ${zoneName}`);
         showOverrideModal(zoneName, value, async (overrideData) => {
           await saveSetpoint(setpointBtn, row, zoneName, value, input, overrideData);
         });
       } else {
-        // Direct save for non-AUTO modes
+        // For non-AUTO modes, save directly but let backend handle any mode conflicts
+        console.log(`[Setpoint] Direct save for non-AUTO zone ${zoneName} (mode: ${currentMode})`);
         await saveSetpoint(setpointBtn, row, zoneName, value, input);
       }
       return;
@@ -2371,15 +2501,53 @@ if (zonesTableElement) {
     try {
       button.disabled = true;
       button.classList.add("loading");
+      console.log(`[Command] Sending ${command} to ${zoneName}`);
+      const commandStartTime = performance.now();
+
       const response = await fetchJson(`${API_BASE}/zones/${zoneName}/command`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command }),
       });
-      // Update just this zone row with the response data (response is the zone object directly)
-      if (response) {
-        updateZoneRow(row, response);
-        updateZonesCache({ zones: [response] });
+
+      const responseTime = performance.now();
+      console.log(`[Command] API response received in ${(responseTime - commandStartTime).toFixed(2)}ms`);
+      console.log(`[Command] Full response from API:`, response);
+
+      // Handle wrapped response - if response has a 'zone' property, use that
+      let zoneData = response;
+      if (response && response.zone && typeof response.zone === 'object') {
+        zoneData = response.zone;
+      }
+
+      console.log(`[Command] Processed zone data:`, zoneData);
+      console.log(`[Command] Has zone_name?`, !!zoneData?.zone_name);
+      console.log(`[Command] Has ZoneName?`, !!zoneData?.ZoneName);
+
+      // Immediately update UI with command response for instant feedback
+      // Check for both lowercase zone_name and uppercase ZoneName
+      if (zoneData && (zoneData.zone_name || zoneData.ZoneName)) {
+        console.log(`[Command] IMMEDIATE UPDATE for ${zoneName}:`, zoneData);
+        const updateStartTime = performance.now();
+        updateZoneRow(row, zoneData);
+        updateZonesCache({ zones: [zoneData] });
+        const updateEndTime = performance.now();
+        console.log(`[Command] UI update completed in ${(updateEndTime - updateStartTime).toFixed(2)}ms`);
+      } else {
+        // If command response is incomplete, fetch fresh data
+        console.log(`[Command] FALLBACK - Incomplete response for ${zoneName}, fetching fresh data`);
+        const fallbackStartTime = performance.now();
+        try {
+          const freshData = await fetchJson(`${API_BASE}/zones/${zoneName}`);
+          if (freshData) {
+            updateZoneRow(row, freshData);
+            updateZonesCache({ zones: [freshData] });
+            const fallbackEndTime = performance.now();
+            console.log(`[Command] Fallback update completed in ${(fallbackEndTime - fallbackStartTime).toFixed(2)}ms`);
+          }
+        } catch (err) {
+          console.error(`Failed to refresh zone ${zoneName} after command:`, err);
+        }
       }
     } catch (error) {
       console.error("Failed to send command", error);
@@ -2500,6 +2668,14 @@ if (zoneSelect) {
 // Lightweight auto-refresh so the dashboard stays current.
 if (shouldPollZones || shouldPollEvents || shouldPollStats || shouldPollChart) {
   setInterval(() => {
+    // Clean up old override tracking entries (older than 1 minute)
+    const now = Date.now();
+    for (const [zoneName, timestamp] of recentOverrides.entries()) {
+      if (now - timestamp > 60000) {
+        recentOverrides.delete(zoneName);
+      }
+    }
+
     if (shouldPollZones) {
       refreshZones();
     }
@@ -3713,21 +3889,25 @@ async function saveCurrentZoneAsPreset(zone) {
   const name = window.prompt("Preset name:");
   if (!name) return;
   const description = window.prompt("Preset description (optional):", "") || null;
+  const payload = {
+    name,
+    description,
+    entries: serializeSchedulerEntries(state.entries),
+  };
+  console.log("[Scheduler] Saving preset with payload:", JSON.stringify(payload, null, 2));
   try {
     const preset = await fetchJson(`${API_BASE}/schedule/presets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        description,
-        entries: serializeSchedulerEntries(state.entries),
-      }),
+      body: JSON.stringify(payload),
     });
+    console.log("[Scheduler] Preset saved successfully:", preset);
     const presetId = preset.Id ?? preset.id;
     await loadSchedulerPresets(presetId);
     window.alert("Preset saved.");
   } catch (error) {
-    console.error("Failed to save preset", error);
-    window.alert("Failed to save preset.");
+    console.error("Failed to save preset - Error details:", error);
+    const errorMsg = error.message || error.detail || JSON.stringify(error);
+    window.alert(`Failed to save preset: ${errorMsg}`);
   }
 }
