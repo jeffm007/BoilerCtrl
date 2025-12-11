@@ -769,8 +769,14 @@ function updateZoneRow(row, zone) {
     setpointPlaceholder.textContent = "—";
   }
 
-  const modeLabel = controlMode === "THERMOSTAT" ? "T-STAT" : controlMode;
-  row.querySelector(".mode").textContent = modeLabel || "—";
+  // Only update mode if there wasn't a recent command (prevent auto-refresh from overwriting)
+  const recentCommandTime2 = recentCommands.get(zoneName);
+  const hasRecentCommand = recentCommandTime2 && (Date.now() - recentCommandTime2) < 30000;
+  
+  if (!hasRecentCommand) {
+    const modeLabel = controlMode === "THERMOSTAT" ? "T-STAT" : controlMode;
+    row.querySelector(".mode").textContent = modeLabel || "—";
+  }
 
   const isoTimestamp = getProp(zone, "updated_at", "UpdatedAt", "updatedAt") ?? "";
   const [fallbackDate, fallbackTime] = splitTimestamp(isoTimestamp);
