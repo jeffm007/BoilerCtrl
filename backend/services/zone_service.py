@@ -349,7 +349,19 @@ class ZoneService:
             )
         elif command == "AUTO":
             # Hardware is released to automatic logic; we do not change output immediately.
-            repositories.update_zone_status(zone_name, control_mode="AUTO")
+            logger.info(f"AUTO command for {zone_name}: setting ControlMode=AUTO in database")
+
+            # Immediately fetch the scheduled setpoint for this zone
+            scheduled_setpoint = self._resolve_scheduled_setpoint(zone_name)
+            logger.info(f"AUTO command for {zone_name}: scheduled setpoint is {scheduled_setpoint}")
+
+            # Update database with AUTO mode and scheduled setpoint
+            repositories.update_zone_status(
+                zone_name,
+                control_mode="AUTO",
+                target_setpoint_f=scheduled_setpoint,
+                updated_at=timestamp
+            )
             updated_zone = self.get_zone(zone_name)
 
             system_status = repositories.get_system_status()
@@ -384,6 +396,7 @@ class ZoneService:
             return updated_zone
         elif command == "THERMOSTAT":
             # Release control so external thermostat wiring can drive the zone.
+            logger.info(f"THERMOSTAT command for {zone_name}: setting ControlMode=THERMOSTAT in database")
             self.hardware.set_zone_state(zone_name, False)
             system_status = repositories.get_system_status()
             outside_temp = system_status.get("OutsideTemp_F") if system_status else None
@@ -998,6 +1011,9 @@ class ZoneService:
         outside_temp = system_status.get("OutsideTemp_F") if system_status else None
         for raw_row in repositories.list_zone_status():
             working_row = raw_row
+            zone_name = raw_row.get("ZoneName", "?")
+            control_mode = raw_row.get("ControlMode", "?")
+            logger.debug(f"tick_auto_control: {zone_name} has ControlMode={control_mode}")
             if raw_row.get("ControlMode") == "AUTO":
                 working_row = self._ensure_auto_state(raw_row, outside_temp)
             decorated = self._decorate_row(working_row)

@@ -673,6 +673,11 @@ function updateZoneRow(row, zone) {
   const zoneName = getProp(zone, "zone_name", "ZoneName", "zoneName");
   const isSpecial = zoneName === "Z14";
 
+  // Debug logging for setpoint tracking
+  if (zoneName === "Z1" || zoneName === "Z2" || zoneName === "Z3") {
+    console.log(`[updateZoneRow ${zoneName}] Called with zone data:`, zone);
+  }
+
   // Store current values as fallback in case new data is incomplete
   const currentRoomTemp = row.querySelector(".room").textContent;
   const currentPipeTemp = row.querySelector(".pipe").textContent;
@@ -707,76 +712,84 @@ function updateZoneRow(row, zone) {
   const setpointValue = getProp(zone, "target_setpoint_f", "TargetSetpoint_F", "targetSetpointF");
   const controlModeRaw = getProp(zone, "control_mode", "ControlMode", "controlMode");
   const controlMode = controlModeRaw ? String(controlModeRaw).toUpperCase() : "";
-  const setpointInput = row.querySelector(".setpoint-input");
 
+  // Handle setpoint input - need to swap between placeholder and input based on mode
+  const setpointCell = row.querySelector(".setpoint");
+  let setpointInput = row.querySelector(".setpoint-input");
+  const setpointPlaceholder = row.querySelector(".setpoint-placeholder");
+
+  // Debug logging for Z1, Z2, Z3
+  if (zoneName === "Z1" || zoneName === "Z2" || zoneName === "Z3") {
+    console.log(`[Setpoint ${zoneName}] mode=${controlMode}, setpointValue=${setpointValue}, hasInput=${!!setpointInput}, hasPlaceholder=${!!setpointPlaceholder}`);
+  }
+
+  // If mode is AUTO and we only have placeholder, create the input
+  if (controlMode === "AUTO" && !setpointInput && setpointPlaceholder && setpointCell) {
+    if (zoneName === "Z1" || zoneName === "Z2" || zoneName === "Z3") {
+      console.log(`[Setpoint ${zoneName}] Creating input element (was placeholder)`);
+    }
+
+    // Replace placeholder with input control
+    const setpointControl = document.createElement('div');
+    setpointControl.className = 'setpoint-control';
+    setpointControl.innerHTML = `
+      <input type="number" class="setpoint-input" step="0.5" min="30" max="90" placeholder="—" />
+      <button class="small-btn setpoint-save" type="button">Save</button>
+    `;
+    setpointCell.innerHTML = '';
+    setpointCell.appendChild(setpointControl);
+
+    // Re-query the newly created input
+    setpointInput = row.querySelector(".setpoint-input");
+
+    // Attach event listener to the new save button
+    const saveButton = setpointControl.querySelector(".setpoint-save");
+    if (saveButton) {
+      saveButton.addEventListener("click", () => handleSetpointSave(zoneName, setpointInput));
+    }
+  }
+  // If mode is NOT AUTO and we have an input, replace with placeholder
+  else if (controlMode !== "AUTO" && setpointInput && !setpointPlaceholder && setpointCell) {
+    if (zoneName === "Z1" || zoneName === "Z2" || zoneName === "Z3") {
+      console.log(`[Setpoint ${zoneName}] Replacing input with placeholder (mode is ${controlMode})`);
+    }
+
+    setpointCell.innerHTML = '<span class="muted setpoint-placeholder">—</span>';
+    setpointInput = null; // Clear reference since we just removed it
+  }
+
+  // Now update the input if it exists
   if (setpointInput) {
-    // Check if user is actively editing OR if this field was just saved
+    // Check if user is actively editing
     const isActive = document.activeElement === setpointInput;
     const justSaved = setpointInput.dataset.justSaved === 'true';
 
-    // Check if this zone was recently overridden
-    const recentOverrideTime = recentOverrides.get(zoneName);
-    const isRecentlyOverridden = recentOverrideTime && (Date.now() - recentOverrideTime) < 30000; // 30 seconds
+    // For AUTO mode with a valid setpoint, always update (unless user is actively typing)
+    if (controlMode === "AUTO" && setpointValue != null && !isActive && !justSaved) {
+      setpointInput.disabled = false;
+      const saveButton = row.querySelector(".setpoint-save");
+      if (saveButton) saveButton.disabled = false;
 
-    // Check if this zone recently had a command executed
-    const recentCommandTime = recentCommands.get(zoneName);
-    const isRecentCommand = recentCommandTime && (Date.now() - recentCommandTime) < 30000; // 30 seconds
+      const formatted = Number.parseFloat(setpointValue).toFixed(1);
+      setpointInput.value = formatted;
 
-    if (!isActive && !justSaved && !isRecentlyOverridden && !isRecentCommand) {
-      // Show '-' if not in AUTO mode (THERMOSTAT, MANUAL, ON, OFF should all show dash)
-      if (controlMode !== "AUTO") {
-        setpointInput.value = "";
-        setpointInput.placeholder = "—";
-        setpointInput.disabled = true;
-
-        // Also disable the save button for non-editable modes
-        const saveButton = row.querySelector(".setpoint-save");
-        if (saveButton) {
-          saveButton.disabled = true;
-        }
-      } else {
-        // Enable input only for AUTO mode
-        setpointInput.disabled = false;
-
-        // Also enable the save button for editable modes
-        const saveButton = row.querySelector(".setpoint-save");
-        if (saveButton) {
-          saveButton.disabled = false;
-        }
-
-        // Only update if user isn't actively editing and didn't just save
-        if (setpointValue === null || setpointValue === undefined) {
-          // Only clear if we don't have a current valid value
-          if (!currentSetpoint || currentSetpoint === "" || currentSetpoint === "—") {
-            setpointInput.value = "";
-            setpointInput.placeholder = "—";
-          } else {
-            // Keep the current setpoint value instead of clearing
-          }
-        } else {
-          const formatted = Number.parseFloat(setpointValue).toFixed(1);
-          setpointInput.value = formatted;
-        }
+      if (zoneName === "Z1" || zoneName === "Z2" || zoneName === "Z3") {
+        console.log(`[Setpoint ${zoneName}] Updated to ${formatted}`);
       }
-    } else if (justSaved) {
-      // Skip update, field was just saved
-    } else {
-      // Skip update, field has focus
+    } else if (controlMode !== "AUTO" && !isActive && !justSaved) {
+      // Non-AUTO modes: show dash
+      setpointInput.value = "";
+      setpointInput.placeholder = "—";
+      setpointInput.disabled = true;
+      const saveButton = row.querySelector(".setpoint-save");
+      if (saveButton) saveButton.disabled = true;
     }
-  }
-  const setpointPlaceholder = row.querySelector(".setpoint-placeholder");
-  if (setpointPlaceholder) {
-    setpointPlaceholder.textContent = "—";
+    // If user is actively editing or just saved, don't touch the input
   }
 
-  // Only update mode if there wasn't a recent command (prevent auto-refresh from overwriting)
-  const recentCommandTime2 = recentCommands.get(zoneName);
-  const hasRecentCommand = recentCommandTime2 && (Date.now() - recentCommandTime2) < 30000;
-  
-  if (!hasRecentCommand) {
-    const modeLabel = controlMode === "THERMOSTAT" ? "T-STAT" : controlMode;
-    row.querySelector(".mode").textContent = modeLabel || "—";
-  }
+  // Always update mode from backend - the command handlers will update it immediately anyway
+  const modeLabel = controlMode === "THERMOSTAT" ? "T-STAT" : controlMode;
+  row.querySelector(".mode").textContent = modeLabel || "—";
 
   const isoTimestamp = getProp(zone, "updated_at", "UpdatedAt", "updatedAt") ?? "";
   const [fallbackDate, fallbackTime] = splitTimestamp(isoTimestamp);

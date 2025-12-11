@@ -107,9 +107,13 @@ async def handle_state_update(payload: dict):
 
             if cached_zone:
                 cached_updated_at = cached_zone.get("UpdatedAt")
-                # Compare timestamps - only update if incoming is newer or equal
+                # Compare timestamps - normalize both to same format (replace space with T)
                 if incoming_updated_at and cached_updated_at:
-                    if incoming_updated_at >= cached_updated_at:
+                    # Normalize timestamps: replace space with T for consistent comparison
+                    incoming_normalized = str(incoming_updated_at).replace(" ", "T")
+                    cached_normalized = str(cached_updated_at).replace(" ", "T")
+
+                    if incoming_normalized >= cached_normalized:
                         zone_cache[zone_name] = zone
                         updates_made += 1
                     else:
@@ -334,6 +338,20 @@ def list_zones():
     if not zones:
         raise HTTPException(status_code=503, detail="No data available - Pi may be disconnected")
     return zones
+
+
+@app.get("/api/zones/debug/{zone_name}")
+def debug_zone_cache(zone_name: str):
+    """Debug endpoint to inspect cache for a specific zone."""
+    cached = zone_cache.get(zone_name)
+    if not cached:
+        return {"error": f"Zone {zone_name} not in cache", "cache_keys": list(zone_cache.keys())}
+    return {
+        "zone_name": zone_name,
+        "cached_data": cached,
+        "cache_timestamp": cache_timestamp.isoformat() if cache_timestamp else None,
+        "cache_age_seconds": (datetime.utcnow() - cache_timestamp).total_seconds() if cache_timestamp else None
+    }
 
 
 @app.get("/api/zones/stats")
