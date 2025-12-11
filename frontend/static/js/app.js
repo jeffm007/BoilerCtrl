@@ -5,6 +5,7 @@ const DEFAULT_TIME_ZONE = "America/Denver";
 
 // Track recent overrides to prevent immediate refresh conflicts
 let recentOverrides = new Map(); // zoneName -> timestamp
+let recentCommands = new Map(); // zoneName -> timestamp
 
 const zonesTable = document.querySelector("#zonesTable tbody");
 const eventsTableBody = document.querySelector("#eventsTable tbody");
@@ -717,7 +718,11 @@ function updateZoneRow(row, zone) {
     const recentOverrideTime = recentOverrides.get(zoneName);
     const isRecentlyOverridden = recentOverrideTime && (Date.now() - recentOverrideTime) < 30000; // 30 seconds
 
-    if (!isActive && !justSaved && !isRecentlyOverridden) {
+    // Check if this zone recently had a command executed
+    const recentCommandTime = recentCommands.get(zoneName);
+    const isRecentCommand = recentCommandTime && (Date.now() - recentCommandTime) < 30000; // 30 seconds
+
+    if (!isActive && !justSaved && !isRecentlyOverridden && !isRecentCommand) {
       // Show '-' if not in AUTO mode (THERMOSTAT, MANUAL, ON, OFF should all show dash)
       if (controlMode !== "AUTO") {
         setpointInput.value = "";
@@ -834,7 +839,7 @@ async function refreshZones() {
 // Update Pi connection status indicator
 function updatePiStatus(isOnline) {
   if (!piStatusEl) return;
-  
+
   if (isOnline) {
     piStatusEl.classList.add('status-online');
     piStatusEl.classList.remove('status-offline');
@@ -2547,6 +2552,11 @@ if (zonesTableElement) {
         const updateStartTime = performance.now();
         updateZoneRow(row, zoneData);
         updateZonesCache({ zones: [zoneData] });
+
+        // Track this command to prevent immediate refresh from overwriting it
+        recentCommands.set(zoneName, Date.now());
+        console.log(`[Command] Tracking recent command for ${zoneName} to prevent refresh conflicts`);
+
         const updateEndTime = performance.now();
         console.log(`[Command] UI update completed in ${(updateEndTime - updateStartTime).toFixed(2)}ms`);
       } else {
@@ -2684,11 +2694,16 @@ if (zoneSelect) {
 // Lightweight auto-refresh so the dashboard stays current.
 if (shouldPollZones || shouldPollEvents || shouldPollStats || shouldPollChart) {
   setInterval(() => {
-    // Clean up old override tracking entries (older than 1 minute)
+    // Clean up old override and command tracking entries (older than 1 minute)
     const now = Date.now();
     for (const [zoneName, timestamp] of recentOverrides.entries()) {
       if (now - timestamp > 60000) {
         recentOverrides.delete(zoneName);
+      }
+    }
+    for (const [zoneName, timestamp] of recentCommands.entries()) {
+      if (now - timestamp > 60000) {
+        recentCommands.delete(zoneName);
       }
     }
 
