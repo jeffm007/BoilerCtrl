@@ -88,34 +88,23 @@ templates = Jinja2Templates(directory=frontend_path / "templates")
 
 # State update handler
 
-def parse_timestamp_safe(ts_str: str) -> datetime:
-    """
-    Parse timestamp string to datetime, handling various formats.
-    Returns epoch (1970) if parsing fails.
-    """
-    if not ts_str:
-        return datetime(1970, 1, 1)
+def parse_timestamp(timestamp_str: str) -> datetime:
+    """Parse timestamp from various formats to datetime object."""
+    if not timestamp_str:
+        return datetime.min
 
     try:
-        # Try ISO format with microseconds first (2025-12-10T21:04:31.957435)
-        return datetime.fromisoformat(ts_str.replace('Z', '+00:00').replace('+00:00', ''))
-    except (ValueError, AttributeError):
-        pass
-
-    try:
-        # Try simple format without microseconds (2025-12-10 21:13:36)
-        return datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-    except (ValueError, AttributeError):
-        pass
-
-    try:
-        # Try ISO format without microseconds (2025-12-10T21:13:36)
-        return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")
-    except (ValueError, AttributeError):
-        pass
-
-    logger.warning(f"Failed to parse timestamp: {ts_str}")
-    return datetime(1970, 1, 1)
+        # Try ISO format with microseconds first (e.g., "2025-12-10T18:43:36.513097")
+        if 'T' in timestamp_str:
+            # Remove 'Z' if present and parse
+            clean_str = timestamp_str.replace('Z', '')
+            return datetime.fromisoformat(clean_str)
+        else:
+            # Simple format (e.g., "2025-12-10 18:53:24")
+            return datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+    except Exception as e:
+        logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}")
+        return datetime.min
 
 
 async def handle_state_update(payload: dict):
@@ -137,10 +126,12 @@ async def handle_state_update(payload: dict):
 
             if cached_zone:
                 cached_updated_at = cached_zone.get("UpdatedAt")
-                # Compare timestamps as datetime objects - only update if incoming is newer or equal
+                # Compare timestamps - only update if incoming is newer or equal
                 if incoming_updated_at and cached_updated_at:
-                    incoming_dt = parse_timestamp_safe(incoming_updated_at)
-                    cached_dt = parse_timestamp_safe(cached_updated_at)
+                    # Parse both timestamps to datetime objects for proper comparison
+                    incoming_dt = parse_timestamp(incoming_updated_at)
+                    cached_dt = parse_timestamp(cached_updated_at)
+
                     if incoming_dt >= cached_dt:
                         zone_cache[zone_name] = zone
                         updates_made += 1
@@ -661,18 +652,9 @@ async def create_preset(request: Request):
             )
             response.raise_for_status()
             return response.json()
-    except httpx.HTTPStatusError as e:
-        # Preserve the original status code and error detail from Pi
-        logger.error(f"Failed to create preset on Pi: {e.response.status_code} - {e.response.text}")
-        try:
-            error_detail = e.response.json()
-        except:
-            error_detail = e.response.text
-        raise HTTPException(status_code=e.response.status_code, detail=error_detail)
     except httpx.HTTPError as e:
         logger.error(f"Failed to proxy preset creation to Pi: {e}")
         raise HTTPException(status_code=503, detail=f"Failed to create preset on Pi: {str(e)}")
-
 
 
 @app.get("/api/schedule/presets/{preset_id}")

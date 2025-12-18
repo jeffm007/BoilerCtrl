@@ -3,10 +3,6 @@ console.log("🔧 App.js loaded - VERSION 5.0");
 const API_BASE = "/api";
 const DEFAULT_TIME_ZONE = "America/Denver";
 
-// Track recent overrides to prevent immediate refresh conflicts
-let recentOverrides = new Map(); // zoneName -> timestamp
-let recentCommands = new Map(); // zoneName -> timestamp
-
 const zonesTable = document.querySelector("#zonesTable tbody");
 const eventsTableBody = document.querySelector("#eventsTable tbody");
 const statsTableBody = document.querySelector("#zoneStatsTable tbody");
@@ -20,7 +16,6 @@ const statsCallsHeader = document.getElementById("statsCallsHeader");
 const statsTotalHeader = document.getElementById("statsTotalHeader");
 const outsideTempEl = document.querySelector("#outsideTemp");
 const systemUpdatedEl = document.querySelector("#systemUpdated");
-const piStatusEl = document.getElementById("piStatus");
 const zoneSelect = document.querySelector("#zoneSelect");
 const daySelect = document.querySelector("#daySelect");
 const chartCanvas = document.getElementById("zoneChart");
@@ -135,8 +130,8 @@ const graphsState = {
   resizeTimer: null,
   lastMeta: null,
 };
+const graphsCache = new Map();
 const GRAPHS_CACHE_TTL = 60000;
-const GRAPHS_CACHE_KEY_PREFIX = "graphs.history.";
 const DASHBOARD_ZONES_CACHE_KEY = "dashboard.zones";
 const DASHBOARD_EVENTS_CACHE_KEY = "dashboard.events";
 const DASHBOARD_STATS_CACHE_KEY = "dashboard.stats";
@@ -304,30 +299,6 @@ function formatTime(value) {
   const parts = value.split(":");
   if (parts.length < 2) return value;
   return parts.slice(0, 3).join(":");
-}
-
-// Convert UTC timestamp to local time for display
-function convertUTCToLocal(utcDateStr, utcTimeStr) {
-  if (!utcDateStr || !utcTimeStr) return { date: utcDateStr, time: utcTimeStr };
-
-  try {
-    // Combine date and time, treat as UTC
-    const utcString = `${utcDateStr}T${utcTimeStr}Z`;
-    const utcDate = new Date(utcString);
-
-    if (isNaN(utcDate.getTime())) {
-      return { date: utcDateStr, time: utcTimeStr };
-    }
-
-    // Convert to local time
-    const localDate = utcDate.toLocaleDateString('en-CA'); // YYYY-MM-DD format
-    const localTime = utcDate.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-    return { date: localDate, time: localTime };
-  } catch (e) {
-    console.warn('Error converting UTC to local:', e);
-    return { date: utcDateStr, time: utcTimeStr };
-  }
 }
 
 function normaliseScheduleEntry(entry) {
@@ -673,11 +644,6 @@ function updateZoneRow(row, zone) {
   const zoneName = getProp(zone, "zone_name", "ZoneName", "zoneName");
   const isSpecial = zoneName === "Z14";
 
-  // Debug logging for setpoint tracking
-  if (zoneName === "Z1" || zoneName === "Z2" || zoneName === "Z3") {
-    console.log(`[updateZoneRow ${zoneName}] Called with zone data:`, zone);
-  }
-
   // Store current values as fallback in case new data is incomplete
   const currentRoomTemp = row.querySelector(".room").textContent;
   const currentPipeTemp = row.querySelector(".pipe").textContent;
@@ -710,84 +676,39 @@ function updateZoneRow(row, zone) {
   }
 
   const setpointValue = getProp(zone, "target_setpoint_f", "TargetSetpoint_F", "targetSetpointF");
-  const controlModeRaw = getProp(zone, "control_mode", "ControlMode", "controlMode");
-  const controlMode = controlModeRaw ? String(controlModeRaw).toUpperCase() : "";
-
-  // Handle setpoint input - need to swap between placeholder and input based on mode
-  const setpointCell = row.querySelector(".setpoint");
-  let setpointInput = row.querySelector(".setpoint-input");
-  const setpointPlaceholder = row.querySelector(".setpoint-placeholder");
-
-  // Debug logging for Z1, Z2, Z3
-  if (zoneName === "Z1" || zoneName === "Z2" || zoneName === "Z3") {
-    console.log(`[Setpoint ${zoneName}] mode=${controlMode}, setpointValue=${setpointValue}, hasInput=${!!setpointInput}, hasPlaceholder=${!!setpointPlaceholder}`);
-  }
-
-  // If mode is AUTO and we only have placeholder, create the input
-  if (controlMode === "AUTO" && !setpointInput && setpointPlaceholder && setpointCell) {
-    if (zoneName === "Z1" || zoneName === "Z2" || zoneName === "Z3") {
-      console.log(`[Setpoint ${zoneName}] Creating input element (was placeholder)`);
-    }
-
-    // Replace placeholder with input control
-    const setpointControl = document.createElement('div');
-    setpointControl.className = 'setpoint-control';
-    setpointControl.innerHTML = `
-      <input type="number" class="setpoint-input" step="0.5" min="30" max="90" placeholder="—" />
-      <button class="small-btn setpoint-save" type="button">Save</button>
-    `;
-    setpointCell.innerHTML = '';
-    setpointCell.appendChild(setpointControl);
-
-    // Re-query the newly created input
-    setpointInput = row.querySelector(".setpoint-input");
-
-    // Attach event listener to the new save button
-    const saveButton = setpointControl.querySelector(".setpoint-save");
-    if (saveButton) {
-      saveButton.addEventListener("click", () => handleSetpointSave(zoneName, setpointInput));
-    }
-  }
-  // If mode is NOT AUTO and we have an input, replace with placeholder
-  else if (controlMode !== "AUTO" && setpointInput && !setpointPlaceholder && setpointCell) {
-    if (zoneName === "Z1" || zoneName === "Z2" || zoneName === "Z3") {
-      console.log(`[Setpoint ${zoneName}] Replacing input with placeholder (mode is ${controlMode})`);
-    }
-
-    setpointCell.innerHTML = '<span class="muted setpoint-placeholder">—</span>';
-    setpointInput = null; // Clear reference since we just removed it
-  }
-
-  // Now update the input if it exists
+  const setpointInput = row.querySelector(".setpoint-input");
   if (setpointInput) {
-    // Check if user is actively editing
+    // Check if user is actively editing OR if this field was just saved
     const isActive = document.activeElement === setpointInput;
     const justSaved = setpointInput.dataset.justSaved === 'true';
 
-    // For AUTO mode with a valid setpoint, always update (unless user is actively typing)
-    if (controlMode === "AUTO" && setpointValue != null && !isActive && !justSaved) {
-      setpointInput.disabled = false;
-      const saveButton = row.querySelector(".setpoint-save");
-      if (saveButton) saveButton.disabled = false;
-
-      const formatted = Number.parseFloat(setpointValue).toFixed(1);
-      setpointInput.value = formatted;
-
-      if (zoneName === "Z1" || zoneName === "Z2" || zoneName === "Z3") {
-        console.log(`[Setpoint ${zoneName}] Updated to ${formatted}`);
+    if (!isActive && !justSaved) {
+      // Only update if user isn't actively editing and didn't just save
+      if (setpointValue === null || setpointValue === undefined) {
+        // Only clear if we don't have a current valid value
+        if (!currentSetpoint || currentSetpoint === "" || currentSetpoint === "—") {
+          setpointInput.value = "";
+          setpointInput.placeholder = "—";
+        } else {
+          // Keep the current setpoint value instead of clearing
+        }
+      } else {
+        const formatted = Number.parseFloat(setpointValue).toFixed(1);
+        setpointInput.value = formatted;
       }
-    } else if (controlMode !== "AUTO" && !isActive && !justSaved) {
-      // Non-AUTO modes: show dash
-      setpointInput.value = "";
-      setpointInput.placeholder = "—";
-      setpointInput.disabled = true;
-      const saveButton = row.querySelector(".setpoint-save");
-      if (saveButton) saveButton.disabled = true;
+    } else if (justSaved) {
+      // Skip update, field was just saved
+    } else {
+      // Skip update, field has focus
     }
-    // If user is actively editing or just saved, don't touch the input
+  }
+  const setpointPlaceholder = row.querySelector(".setpoint-placeholder");
+  if (setpointPlaceholder) {
+    setpointPlaceholder.textContent = "—";
   }
 
-  // Always update mode from backend - the command handlers will update it immediately anyway
+  const controlModeRaw = getProp(zone, "control_mode", "ControlMode", "controlMode");
+  const controlMode = controlModeRaw ? String(controlModeRaw).toUpperCase() : "";
   const modeLabel = controlMode === "THERMOSTAT" ? "T-STAT" : controlMode;
   row.querySelector(".mode").textContent = modeLabel || "—";
 
@@ -796,12 +717,10 @@ function updateZoneRow(row, zone) {
   const datePart = getProp(zone, "updated_date", "UpdatedDate", "updatedDate") ?? fallbackDate;
   const timePartRaw = getProp(zone, "updated_time", "UpdatedTime", "updatedTime") ?? fallbackTime;
 
-  // Convert UTC timestamp to local time for display
-  const { date: localDate, time: localTime } = convertUTCToLocal(datePart, timePartRaw);
-
   // Only update date/time if we have new data or current shows "—"
-  const newDate = localDate || "—";
-  const newTime = localTime ? formatTime(localTime) : "—";
+  const newDate = (datePart && datePart.length ? datePart : fallbackDate) || "—";
+  const finalTime = timePartRaw && timePartRaw.length ? timePartRaw : fallbackTime;
+  const newTime = finalTime ? formatTime(finalTime) : "—";
 
   if (newDate && newDate !== "—" || currentDate === "—") {
     row.querySelector(".updated-date").textContent = newDate;
@@ -842,7 +761,6 @@ async function refreshZones() {
     renderZones(zones);
     renderSystemStatusData(system);
     updateZonesCache({ zones, system });
-    updatePiStatus(true);
     if (DASHBOARD_CACHE_DEBUG) {
       console.info("[dashboard] refreshZones() completed", {
         zones: zones.length,
@@ -851,20 +769,6 @@ async function refreshZones() {
     }
   } catch (error) {
     console.error("Failed to refresh zones", error);
-    updatePiStatus(false);
-  }
-}
-
-// Update Pi connection status indicator
-function updatePiStatus(isOnline) {
-  if (!piStatusEl) return;
-
-  if (isOnline) {
-    piStatusEl.classList.add('status-online');
-    piStatusEl.classList.remove('status-offline');
-  } else {
-    piStatusEl.classList.add('status-offline');
-    piStatusEl.classList.remove('status-online');
   }
 }
 
@@ -1587,41 +1491,6 @@ function initializeScheduler() {
     schedulerPresetSaveBtn.addEventListener("click", () => {
       if (!schedulerZoneSelect) return;
       saveCurrentZoneAsPreset(schedulerZoneSelect.value);
-    });
-  }
-
-  const schedulerPresetDeleteBtn = document.getElementById("schedulerPresetDeleteBtn");
-  if (schedulerPresetDeleteBtn) {
-    schedulerPresetDeleteBtn.addEventListener("click", async () => {
-      if (!schedulerPresetSelect || !schedulerPresetSelect.value) {
-        window.alert("Select a preset to delete.");
-        return;
-      }
-      const id = Number.parseInt(schedulerPresetSelect.value, 10);
-      if (Number.isNaN(id)) {
-        window.alert("Invalid preset selection.");
-        return;
-      }
-      const preset = presetsCache.find((p) => (p.Id ?? p.id) === id);
-      const name = preset ? preset.Name ?? preset.name ?? "this preset" : "this preset";
-      const confirmed = window.confirm(`Delete preset "${name}"? This cannot be undone.`);
-      if (!confirmed) {
-        return;
-      }
-      try {
-        const response = await fetch(`${API_BASE}/schedule/presets/${id}`, {
-          method: "DELETE",
-        });
-        if (!response.ok) {
-          const text = await response.text();
-          throw new Error(text || "Failed to delete preset");
-        }
-        await loadSchedulerPresets();
-        window.alert("Preset deleted.");
-      } catch (error) {
-        console.error("Failed to delete preset", error);
-        window.alert("Failed to delete preset: " + (error.message || error));
-      }
     });
   }
 
@@ -2466,12 +2335,6 @@ async function saveSetpoint(setpointBtn, row, zoneName, value, input, overrideDa
     });
     console.log(`[Setpoint] Response received:`, updated);
 
-    // Track this override to prevent immediate refresh conflicts
-    if (overrideData) {
-      recentOverrides.set(zoneName, Date.now());
-      console.log(`[Setpoint] Tracking recent override for ${zoneName} to prevent refresh conflicts`);
-    }
-
     if (updated && updated.zone) {
       console.log(`[Setpoint] Updating cache with zone data, setpoint=${updated.zone.TargetSetpoint_F || updated.zone.target_setpoint_f}`);
       updateZonesCache({ zones: [updated.zone] });
@@ -2515,17 +2378,13 @@ if (zonesTableElement) {
       const modeCell = row.querySelector(".mode");
       const currentMode = modeCell ? modeCell.textContent.trim() : "";
 
-      console.log(`[Setpoint] Zone ${zoneName} mode check: UI shows '${currentMode}', saving value ${value}`);
-
       if (currentMode === "AUTO") {
-        // Show override modal for zones currently in AUTO mode
-        console.log(`[Setpoint] Showing override modal for AUTO zone ${zoneName}`);
+        // Show override modal
         showOverrideModal(zoneName, value, async (overrideData) => {
           await saveSetpoint(setpointBtn, row, zoneName, value, input, overrideData);
         });
       } else {
-        // For non-AUTO modes, save directly but let backend handle any mode conflicts
-        console.log(`[Setpoint] Direct save for non-AUTO zone ${zoneName} (mode: ${currentMode})`);
+        // Direct save for non-AUTO modes
         await saveSetpoint(setpointBtn, row, zoneName, value, input);
       }
       return;
@@ -2542,7 +2401,6 @@ if (zonesTableElement) {
       button.disabled = true;
       button.classList.add("loading");
       console.log(`[Command] Sending ${command} to ${zoneName}`);
-      const commandStartTime = performance.now();
 
       const response = await fetchJson(`${API_BASE}/zones/${zoneName}/command`, {
         method: "POST",
@@ -2550,50 +2408,29 @@ if (zonesTableElement) {
         body: JSON.stringify({ command }),
       });
 
-      const responseTime = performance.now();
-      console.log(`[Command] API response received in ${(responseTime - commandStartTime).toFixed(2)}ms`);
-      console.log(`[Command] Full response from API:`, response);
-
       // Handle wrapped response - if response has a 'zone' property, use that
       let zoneData = response;
       if (response && response.zone && typeof response.zone === 'object') {
         zoneData = response.zone;
       }
 
-      console.log(`[Command] Processed zone data:`, zoneData);
-      console.log(`[Command] Has zone_name?`, !!zoneData?.zone_name);
-      console.log(`[Command] Has ZoneName?`, !!zoneData?.ZoneName);
-
-      // Immediately update UI with command response for instant feedback
-      // Check for both lowercase zone_name and uppercase ZoneName
-      if (zoneData && (zoneData.zone_name || zoneData.ZoneName)) {
-        console.log(`[Command] IMMEDIATE UPDATE for ${zoneName}:`, zoneData);
-        const updateStartTime = performance.now();
-        updateZoneRow(row, zoneData);
-        updateZonesCache({ zones: [zoneData] });
-
-        // Track this command to prevent immediate refresh from overwriting it
-        recentCommands.set(zoneName, Date.now());
-        console.log(`[Command] Tracking recent command for ${zoneName} to prevent refresh conflicts`);
-
-        const updateEndTime = performance.now();
-        console.log(`[Command] UI update completed in ${(updateEndTime - updateStartTime).toFixed(2)}ms`);
-      } else {
-        // If command response is incomplete, fetch fresh data
-        console.log(`[Command] FALLBACK - Incomplete response for ${zoneName}, fetching fresh data`);
-        const fallbackStartTime = performance.now();
+      // Wait briefly and fetch fresh zone data to ensure completeness
+      setTimeout(async () => {
         try {
           const freshData = await fetchJson(`${API_BASE}/zones/${zoneName}`);
           if (freshData) {
             updateZoneRow(row, freshData);
             updateZonesCache({ zones: [freshData] });
-            const fallbackEndTime = performance.now();
-            console.log(`[Command] Fallback update completed in ${(fallbackEndTime - fallbackStartTime).toFixed(2)}ms`);
+          } else {
+            updateZoneRow(row, zoneData);
+            updateZonesCache({ zones: [zoneData] });
           }
         } catch (err) {
           console.error(`Failed to refresh zone ${zoneName} after command:`, err);
+          updateZoneRow(row, zoneData);
+          updateZonesCache({ zones: [zoneData] });
         }
-      }
+      }, 250); // Brief delay to allow backend to settle
     } catch (error) {
       console.error("Failed to send command", error);
     } finally {
@@ -2713,19 +2550,6 @@ if (zoneSelect) {
 // Lightweight auto-refresh so the dashboard stays current.
 if (shouldPollZones || shouldPollEvents || shouldPollStats || shouldPollChart) {
   setInterval(() => {
-    // Clean up old override and command tracking entries (older than 1 minute)
-    const now = Date.now();
-    for (const [zoneName, timestamp] of recentOverrides.entries()) {
-      if (now - timestamp > 60000) {
-        recentOverrides.delete(zoneName);
-      }
-    }
-    for (const [zoneName, timestamp] of recentCommands.entries()) {
-      if (now - timestamp > 60000) {
-        recentCommands.delete(zoneName);
-      }
-    }
-
     if (shouldPollZones) {
       refreshZones();
     }
@@ -3064,21 +2888,19 @@ function renderZoneChart(samplePoints, runEvents, zoneName, options = {}, contex
     const totalHours = spanMs / HOUR_MS;
     const hourStep = Math.max(1, Math.round(totalHours / 24));
     const maxHour = Math.round(totalHours);
-    // Stop labels before maxHour to prevent overlap
-    const labelLimit = Math.max(maxHour - hourStep, 0);
-    for (let hour = 0; hour <= labelLimit; hour += hourStep) {
+    for (let hour = 0; hour <= maxHour; hour += hourStep) {
       const tickRatio = totalHours ? hour / totalHours : 0;
       const tickTime = minAxis + spanMs * tickRatio;
       const x = scaleX(tickTime);
       if (hour === 0) {
         ctx.textAlign = "left";
-      } else if (hour >= labelLimit - hourStep / 2) {
+      } else if (hour >= maxHour - hourStep / 2) {
         ctx.textAlign = "right";
       } else {
         ctx.textAlign = "center";
       }
       ctx.fillText(`${hour}h`, x, height - padding.bottom + 12);
-      if (hour !== 0) {
+      if (hour !== 0 && hour !== maxHour) {
         ctx.strokeStyle = "rgba(255,255,255,0.04)";
         ctx.beginPath();
         ctx.moveTo(x, padding.top);
@@ -3168,7 +2990,7 @@ function renderZoneChart(samplePoints, runEvents, zoneName, options = {}, contex
     for (let i = 0; i <= runSteps; i += 1) {
       const value = (runAxisMax / runSteps) * i;
       const y = scaleRunY(value);
-      ctx.fillText(`${value.toFixed(1)} min/h`, width - padding.right + 50, y);
+      ctx.fillText(`${value.toFixed(1)} min per hr`, width - padding.right + 62, y);
       ctx.strokeStyle = "rgba(255,196,66,0.13)";
       ctx.beginPath();
       ctx.moveTo(width - padding.right, y);
@@ -3184,7 +3006,7 @@ function renderZoneChart(samplePoints, runEvents, zoneName, options = {}, contex
   ctx.fillText(`${zoneName} Room Temp (°F)`, padding.left, padding.top - 28);
   if (hasRunData) {
     ctx.textAlign = "right";
-    ctx.fillText(`Avg Runtime (min/h)`, width - padding.right, padding.top - 28);
+    ctx.fillText(`Avg Run Time per Hour`, width - padding.right, padding.top - 28);
   }
 }
 function initializeChart() {
@@ -3390,66 +3212,21 @@ function buildHistoryRequest(options = undefined) {
   };
 }
 
-function getCachedHistories(cacheKey, zones) {
-  try {
-    const histories = {};
-    let allCached = true;
-    let anyCached = false;
-    
-    for (const zoneName of zones) {
-      const zoneKey = `${GRAPHS_CACHE_KEY_PREFIX}${cacheKey}|${zoneName}`;
-      const raw = window.sessionStorage.getItem(zoneKey);
-      if (!raw) {
-        allCached = false;
-        continue;
-      }
-      const entry = JSON.parse(raw);
-      if (!entry || typeof entry !== "object") {
-        allCached = false;
-        continue;
-      }
-      if (entry.expiresAt && entry.expiresAt < Date.now()) {
-        window.sessionStorage.removeItem(zoneKey);
-        allCached = false;
-        continue;
-      }
-      histories[zoneName] = entry.data;
-      anyCached = true;
-    }
-    
-    if (allCached && anyCached) {
-      console.log("[Graphs] Using cached histories for all zones");
-      return histories;
-    }
-    return null;
-  } catch (error) {
-    console.error("[Graphs] Failed to read cache:", error);
+function getCachedHistories(cacheKey) {
+  const entry = graphsCache.get(cacheKey);
+  if (!entry) return null;
+  if (entry.expiresAt < Date.now()) {
+    graphsCache.delete(cacheKey);
     return null;
   }
+  return entry.data;
 }
 
 function setCachedHistories(cacheKey, data) {
-  try {
-    let cachedCount = 0;
-    for (const [zoneName, zoneHistory] of Object.entries(data)) {
-      const zoneKey = `${GRAPHS_CACHE_KEY_PREFIX}${cacheKey}|${zoneName}`;
-      try {
-        window.sessionStorage.setItem(
-          zoneKey,
-          JSON.stringify({
-            data: zoneHistory,
-            expiresAt: Date.now() + GRAPHS_CACHE_TTL,
-          })
-        );
-        cachedCount++;
-      } catch (err) {
-        console.warn(`[Graphs] Failed to cache ${zoneName}:`, err.message);
-      }
-    }
-    console.log(`[Graphs] Cached ${cachedCount}/${Object.keys(data).length} zones for 60 seconds`);
-  } catch (error) {
-    console.error("[Graphs] Failed to write cache:", error);
-  }
+  graphsCache.set(cacheKey, {
+    data,
+    expiresAt: Date.now() + GRAPHS_CACHE_TTL,
+  });
 }
 
 function readDashboardCache(key) {
@@ -3754,7 +3531,7 @@ async function loadGraphsForDay(dayOverride, { force = false } = {}) {
     entry.lastPayload = null;
   });
   try {
-    let histories = force ? null : getCachedHistories(cacheKey, zones);
+    let histories = force ? null : getCachedHistories(cacheKey);
     if (!histories) {
       console.log("[Graphs] Fetching history from API:", `${API_BASE}/zones/history/batch?${request.queryString}`);
       const response = await fetchJson(
@@ -3904,14 +3681,7 @@ function initializeGraphsPage() {
 
   if (graphsRefreshBtn) {
     graphsRefreshBtn.addEventListener("click", () => {
-      // Clear all graphs cache entries from sessionStorage
-      const keys = Object.keys(window.sessionStorage);
-      keys.forEach(key => {
-        if (key.startsWith(GRAPHS_CACHE_KEY_PREFIX)) {
-          window.sessionStorage.removeItem(key);
-        }
-      });
-      console.log("[Graphs] Cache cleared");
+      graphsCache.clear();
       loadGraphsForDay(undefined, { force: true });
     });
   }
@@ -3928,14 +3698,7 @@ function initializeGraphsPage() {
         graphsMonthSelect.value = getCurrentMonthValue();
       }
       updateInputMode();
-      // Clear all graphs cache entries from sessionStorage
-      const keys = Object.keys(window.sessionStorage);
-      keys.forEach(key => {
-        if (key.startsWith(GRAPHS_CACHE_KEY_PREFIX)) {
-          window.sessionStorage.removeItem(key);
-        }
-      });
-      console.log("[Graphs] Cache cleared");
+      graphsCache.clear();
       loadGraphsForDay(null, { force: true });
     });
   }
@@ -3962,56 +3725,6 @@ function initializeGraphsPage() {
   }
 
   updateInputMode();
-
-  // Try to hydrate from cache first for instant display
-  const selection = getGraphsRangeSelection();
-  const request = buildHistoryRequest(selection.params);
-  const zones = graphsState.cards.map((entry) => entry.zone);
-  const cacheKey = `${request.queryString}|${zones.join(",")}`;
-  const cachedHistories = getCachedHistories(cacheKey, zones);
-
-  if (cachedHistories) {
-    console.log("[Graphs] Hydrating from cache for instant display");
-    const spanDays = Math.max(
-      1,
-      request.meta.day
-        ? request.meta.resolvedSpanDays ?? 1
-        : Math.round(request.meta.estimatedHours / 24)
-    );
-    const dayInfo = request.meta.day
-      ? getDayWindow(request.meta.day, DEFAULT_TIME_ZONE, spanDays)
-      : null;
-    const chartMeta = {
-      dayInfo,
-      timeZone: DEFAULT_TIME_ZONE,
-      spanDays,
-      rangeHours: request.meta.estimatedHours,
-    };
-    graphsState.lastMeta = chartMeta;
-
-    zones.forEach((zone) => {
-      const entry = graphsState.cardMap.get(zone);
-      if (!entry) return;
-      const rawHistory = cachedHistories[zone] || [];
-      const prepared = prepareHistoryData(rawHistory);
-      if (prepared.hasSamples || prepared.hasRuns) {
-        entry.lastPayload = prepared;
-        if (entry.emptyEl) entry.emptyEl.style.display = "none";
-        renderZoneChart(
-          prepared.samples,
-          prepared.runEvents,
-          entry.zone,
-          chartMeta,
-          { canvas: entry.canvas, ctx: entry.ctx, emptyEl: entry.emptyEl }
-        );
-        if (entry.statusEl) {
-          entry.statusEl.textContent = `Cached · ${new Date().toLocaleTimeString()}`;
-        }
-      }
-    });
-  }
-
-  // Always fetch fresh data in background
   loadGraphsForDay();
 
   window.addEventListener("resize", () => {
@@ -4050,25 +3763,21 @@ async function saveCurrentZoneAsPreset(zone) {
   const name = window.prompt("Preset name:");
   if (!name) return;
   const description = window.prompt("Preset description (optional):", "") || null;
-  const payload = {
-    name,
-    description,
-    entries: serializeSchedulerEntries(state.entries),
-  };
-  console.log("[Scheduler] Saving preset with payload:", JSON.stringify(payload, null, 2));
   try {
     const preset = await fetchJson(`${API_BASE}/schedule/presets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        name,
+        description,
+        entries: serializeSchedulerEntries(state.entries),
+      }),
     });
-    console.log("[Scheduler] Preset saved successfully:", preset);
     const presetId = preset.Id ?? preset.id;
     await loadSchedulerPresets(presetId);
     window.alert("Preset saved.");
   } catch (error) {
-    console.error("Failed to save preset - Error details:", error);
-    const errorMsg = error.message || error.detail || JSON.stringify(error);
-    window.alert(`Failed to save preset: ${errorMsg}`);
+    console.error("Failed to save preset", error);
+    window.alert("Failed to save preset.");
   }
 }

@@ -3,12 +3,14 @@ version: '3.8'
 services:
   web-dashboard:
     build: .
+    image: boiler-web-dashboard
     container_name: boiler-web-dashboard
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      - PI_WS_URL=ws://YOUR_PI_IP:8001/ws
+      - PI_WS_URL=ws://192.168.2.2:8001/ws
+      - PI_HTTP_URL=http://192.168.2.2:8001
       - CACHE_TTL=10
       - LOG_LEVEL=INFO
     volumes:
