@@ -11,6 +11,7 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -270,6 +271,19 @@ def get_cached_zones():
 
 def normalize_zone_dict(zone: dict) -> dict:
     """Convert zone dict from aliased field names to snake_case."""
+    # Get the updated_at timestamp and convert from UTC to Central Time
+    updated_at = zone.get("UpdatedAt") or zone.get("updated_at")
+    if updated_at and isinstance(updated_at, str):
+        try:
+            # Parse UTC timestamp
+            dt_utc = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+            # Convert to Central Time
+            dt_central = dt_utc.astimezone(ZoneInfo("America/Chicago"))
+            # Format back to ISO string without timezone info (for display)
+            updated_at = dt_central.strftime("%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            pass  # Keep original if parsing fails
+    
     return {
         "zone_name": zone.get("ZoneName") or zone.get("zone_name"),
         "room_name": zone.get("RoomName") or zone.get("room_name"),
@@ -278,7 +292,7 @@ def normalize_zone_dict(zone: dict) -> dict:
         "pipe_temp_f": zone.get("PipeTemp_F") or zone.get("pipe_temp_f"),
         "target_setpoint_f": zone.get("TargetSetpoint_F") or zone.get("target_setpoint_f"),
         "control_mode": zone.get("ControlMode") or zone.get("control_mode"),
-        "updated_at": zone.get("UpdatedAt") or zone.get("updated_at"),
+        "updated_at": updated_at,
         "updated_date": zone.get("UpdatedDate") or zone.get("updated_date"),
         "updated_time": zone.get("UpdatedTime") or zone.get("updated_time"),
     }
