@@ -417,6 +417,9 @@ def create_app() -> FastAPI:
             return svc.create_schedule_preset(payload)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        except Exception as exc:
+            logger.exception("Failed to create preset")
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create preset: {str(exc)}")
 
     @app.get(
         "/api/schedule/presets/{preset_id}",

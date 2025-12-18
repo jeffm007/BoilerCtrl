@@ -115,27 +115,6 @@ class ZoneService:
         if hasattr(self.hardware, 'set_zone_setpoint'):
             self.hardware.set_zone_setpoint(zone_name, setpoint)
 
-    def sync_all_states_to_hardware(self) -> None:
-        """
-        Sync all zone states and setpoints from database to hardware controller.
-        Called at startup to ensure mock controller matches database state.
-        """
-        logger.info("🔄 Syncing all zone states to hardware...")
-        for raw_row in repositories.list_zone_status():
-            zone_name = raw_row.get("ZoneName")
-            current_state = raw_row.get("CurrentState")
-            setpoint = raw_row.get("TargetSetpoint_F")
-            
-            if zone_name and current_state:
-                is_on = current_state == "ON"
-                self.hardware.set_zone_state(zone_name, is_on)
-                logger.info(f"  ✅ {zone_name}: state={current_state}, setpoint={setpoint}°F")
-                
-                if setpoint is not None:
-                    self._sync_setpoint_to_hardware(zone_name, setpoint)
-        
-        logger.info("✅ Hardware sync complete")
-
     def preload_history_cache(self, tz: Optional[str] = None) -> None:
         timezone_name = tz or settings.time_zone
         try:

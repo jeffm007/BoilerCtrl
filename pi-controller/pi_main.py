@@ -68,6 +68,11 @@ async def lifespan(app: FastAPI):
     event_service = EventService()
     zone_service = ZoneService(hw_controller, event_service)
 
+    # Sync database zone states to hardware controller
+    logger.info("⚡ About to call sync_all_states_to_hardware...")
+    zone_service.sync_all_states_to_hardware()
+    logger.info("⚡ Finished calling sync_all_states_to_hardware")
+
     # Initialize zones if database is empty
     zones = zone_service.list_zones(include_boiler=True)
     if not zones:
@@ -478,7 +483,15 @@ def update_zone_schedule(
 ):
     """Update zone schedule."""
     try:
-        return zone_service.update_zone_schedule(zone_name, payload)
+        result = zone_service.update_zone_schedule(zone_name, payload)
+
+        # Queue zone status update if the zone is in AUTO mode
+        zone = zone_service.get_zone(zone_name)
+        if zone and zone.control_mode == "AUTO":
+            zones = [zone.model_dump(by_alias=True) for zone in zone_service.list_zones()]
+            sync_server.queue_state_update(zones)
+
+        return result
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:

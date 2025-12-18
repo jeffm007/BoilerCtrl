@@ -104,8 +104,6 @@ class MockHardwareController(BaseHardwareController):
         - Cooling rate: ~0.3-0.5°F per minute
         """
         import time
-        import logging
-        logger = logging.getLogger(__name__)
 
         if zone not in self._current_room_temps:
             return None
@@ -119,10 +117,6 @@ class MockHardwareController(BaseHardwareController):
         last_update = self._last_update.get(zone, now)
         time_delta_minutes = (now - last_update) / 60.0
         self._last_update[zone] = now
-        
-        # Log for debugging
-        if time_delta_minutes > 0.01:  # Only log when time has actually passed
-            logger.info(f"🌡️ {zone}: state={'ON' if is_heating else 'OFF'}, temp={current_temp:.1f}°F, setpoint={target_setpoint:.1f}°F, Δt={time_delta_minutes:.2f}min")
 
         # Simulate temperature change based on heating state
         if is_heating:
@@ -132,14 +126,12 @@ class MockHardwareController(BaseHardwareController):
                 # Heat at 1.5°F per minute
                 temp_rise = min(1.5 * time_delta_minutes, target_temp - current_temp)
                 current_temp += temp_rise
-                logger.info(f"  🔥 {zone} Heating: +{temp_rise:.2f}°F → {current_temp:.1f}°F")
         else:
             # Not heating: drift toward ambient
             if current_temp > self._ambient_temp:
                 # Cool at 0.4°F per minute
                 temp_drop = min(0.4 * time_delta_minutes, current_temp - self._ambient_temp)
                 current_temp -= temp_drop
-                logger.info(f"  ❄️ {zone} Cooling: -{temp_drop:.2f}°F → {current_temp:.1f}°F")
 
         # Add small random measurement noise (-0.1 to +0.1°F)
         noise = random.uniform(-0.1, 0.1)
