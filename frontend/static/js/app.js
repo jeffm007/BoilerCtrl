@@ -3295,7 +3295,12 @@ function initializeChart() {
 function resolveGraphsDayValue(dayOverride) {
   if (dayOverride === null) return null;
   if (dayOverride === undefined) {
-    return graphsDayInput?.value || null;
+    const inputValue = graphsDayInput?.value || null;
+    // Validate format YYYY-MM-DD
+    if (inputValue && !inputValue.match(/^\d{4}-\d{2}-\d{2}$/)) {
+      return null;
+    }
+    return inputValue;
   }
   return dayOverride;
 }
@@ -3366,7 +3371,7 @@ function getGraphsRangeSelection(dayOverride) {
     params: { hours },
   });
   if (range === "week") {
-    if (normalizedDay) {
+    if (normalizedDay && normalizedDay.match(/^\d{4}-\d{2}-\d{2}$/)) {
       // Show 7 days starting from the selected date
       return {
         range,
