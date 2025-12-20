@@ -3334,36 +3334,27 @@ function getTodayIsoDate() {
 
 function formatDisplayDate(isoValue) {
   try {
-    console.log("[formatDisplayDate] input:", isoValue, "type:", typeof isoValue);
     if (!isoValue || typeof isoValue !== 'string') {
-      console.error("[formatDisplayDate] Invalid input type");
       return String(isoValue || '');
     }
     // Parse as local date, not UTC, to avoid timezone offset issues
     const parts = isoValue.split('-');
-    console.log("[formatDisplayDate] split parts:", parts);
     const [year, month, day] = parts.map(Number);
-    console.log("[formatDisplayDate] parsed numbers:", { year, month, day });
     if (!year || !month || !day || isNaN(year) || isNaN(month) || isNaN(day)) {
-      console.error("[formatDisplayDate] Invalid date components");
       return isoValue;
     }
     const parsed = new Date(year, month - 1, day);
-    console.log("[formatDisplayDate] Date object:", parsed, "isValid:", !isNaN(parsed.getTime()));
     if (isNaN(parsed.getTime())) {
-      console.error("[formatDisplayDate] Invalid date object");
       return isoValue;
     }
-    console.log("[formatDisplayDate] About to format...");
     const result = parsed.toLocaleDateString(undefined, {
       month: "short",
       day: "numeric",
       year: "numeric",
     });
-    console.log("[formatDisplayDate] Formatted result:", result);
     return result;
   } catch (err) {
-    console.error("[formatDisplayDate] EXCEPTION:", err, "input was:", isoValue);
+    console.error("[formatDisplayDate] Error formatting date:", err);
     return String(isoValue || '');
   }
 }
@@ -3371,7 +3362,6 @@ function formatDisplayDate(isoValue) {
 function getGraphsRangeSelection(dayOverride) {
   const range = graphsRangeSelect?.value || "day";
   const normalizedDay = resolveGraphsDayValue(dayOverride);
-  console.log("[getGraphsRangeSelection] range:", range, "normalizedDay:", normalizedDay);
   const buildRolling = (hours, label) => ({
     range,
     label,
@@ -3380,14 +3370,12 @@ function getGraphsRangeSelection(dayOverride) {
   if (range === "week") {
     if (normalizedDay && normalizedDay.match(/^\d{4}-\d{2}-\d{2}$/)) {
       // Show 7 days starting from the selected date
-      console.log("[getGraphsRangeSelection] Week view with valid date:", normalizedDay);
       return {
         range,
         label: `Showing week starting ${formatDisplayDate(normalizedDay)}`,
         params: { day: normalizedDay, spanDays: 7 },
       };
     }
-    console.log("[getGraphsRangeSelection] Week view - no valid date, using rolling");
     return buildRolling(24 * 7, "Showing last 7 days (rolling).");
   }
   if (range === "month") {
@@ -3822,24 +3810,12 @@ function prepareHistoryData(data) {
 }
 
 async function loadGraphsForDay(dayOverride, { force = false } = {}) {
-  console.log("[Graphs] loadGraphsForDay called, cards.length:", graphsState.cards.length);
   if (!graphsState.cards.length) {
-    console.log("[Graphs] No cards found, returning early");
     return;
   }
-  console.log("[Graphs] About to call getGraphsRangeSelection with dayOverride:", dayOverride);
-  let selection;
-  try {
-    selection = getGraphsRangeSelection(dayOverride);
-    console.log("[Graphs] getGraphsRangeSelection returned:", selection);
-  } catch (err) {
-    console.error("[Graphs] ERROR in getGraphsRangeSelection:", err);
-    console.error("[Graphs] Stack:", err.stack);
-    throw err;
-  }
+  const selection = getGraphsRangeSelection(dayOverride);
   const request = buildHistoryRequest(selection.params);
   const zones = graphsState.cards.map((entry) => entry.zone);
-  console.log("[Graphs] Loading history for zones:", zones);
   const cacheKey = `${request.queryString}|${zones.join(",")}`;
   if (graphsInfo) {
     graphsInfo.textContent = selection.label;
