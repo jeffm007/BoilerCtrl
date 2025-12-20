@@ -9,8 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Union
 import sqlite3
 import logging
 
-from .database import get_connection
-from .config import settings
+from database import get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -697,3 +696,41 @@ def delete_preset(preset_id: int) -> None:
     with get_connection() as conn:
         _execute_query(conn, "DELETE FROM SchedulePresets WHERE Id = ?;", (preset_id,))
         conn.commit()
+
+
+def list_event_log_for_zone(
+    zone_name: str,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    limit: int = 10000
+) -> List[Dict[str, Any]]:
+    """Query EventLog table for a specific zone within a time range."""
+    with get_connection() as conn:
+        query = """
+            SELECT
+                Id,
+                Timestamp,
+                Source,
+                Event,
+                ZoneRoomTemp_F,
+                PipeTemp_F,
+                OutsideTemp_F,
+                DurationSeconds
+            FROM EventLog
+            WHERE Source = ?
+        """
+        params = [zone_name]
+
+        if since:
+            query += " AND Timestamp >= ?"
+            params.append(since)
+
+        if until:
+            query += " AND Timestamp <= ?"
+            params.append(until)
+
+        query += " ORDER BY Timestamp DESC LIMIT ?"
+        params.append(limit)
+
+        cursor = _execute_query(conn, query, tuple(params))
+        return cursor.fetchall()

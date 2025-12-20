@@ -11,7 +11,6 @@ from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime, timedelta
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -30,6 +29,7 @@ from shared.schemas import (
     ZoneScheduleCloneRequest, GlobalScheduleUpdateRequest
 )
 from shared.sync_protocol import SyncClient
+from sync_service import SyncService
 import os
 
 logging.basicConfig(level=logging.INFO)
@@ -44,16 +44,48 @@ APP_START_TIME = int(datetime.utcnow().timestamp())  # For cache busting
 
 # Global state
 sync_client = SyncClient(command_timeout=10.0)  # 10 second timeout for commands
+sync_service = SyncService(PI_HTTP_URL)  # Database sync service
 zone_cache = {}  # In-memory cache for zone states
 cache_timestamp = None
 ws_connection: Optional[websockets.WebSocketClientProtocol] = None
 reconnect_task = None
+sync_task = None
+
+
+async def periodic_sync_task():
+    """Background task that syncs event_log from Pi every 5 minutes."""
+    # Initial sync after short delay
+    await asyncio.sleep(10)
+    logger.info("🔄 Starting initial database sync...")
+    result = await sync_service.sync_from_pi()
+    if result["success"]:
+        logger.info(f"✅ Initial sync completed: {result['events_fetched']} events fetched")
+    else:
+        logger.error(f"❌ Initial sync failed: {result.get('error', 'Unknown error')}")
+
+    # Periodic sync every 5 minutes
+    interval = 300  # 5 minutes in seconds
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            logger.info("🔄 Running periodic database sync...")
+            result = await sync_service.sync_from_pi()
+            if result["success"]:
+                logger.info(f"✅ Sync completed: {result['events_fetched']} events fetched, {result['events_stored']} stored")
+            else:
+                logger.warning(f"⚠️ Sync failed: {result.get('error', 'Unknown error')}")
+        except asyncio.CancelledError:
+            logger.info("Periodic sync task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in periodic sync: {e}")
+            # Continue running despite errors
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown logic."""
-    global reconnect_task
+    global reconnect_task, sync_task
 
     logger.info("🌐 Starting NAS Web Dashboard...")
 
@@ -63,6 +95,9 @@ async def lifespan(app: FastAPI):
     # Start WebSocket connection task
     reconnect_task = asyncio.create_task(maintain_pi_connection())
 
+    # Start periodic database sync task
+    sync_task = asyncio.create_task(periodic_sync_task())
+
     logger.info("✅ NAS Web Dashboard started")
 
     yield
@@ -71,6 +106,8 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 Shutting down NAS Web Dashboard...")
     if reconnect_task:
         reconnect_task.cancel()
+    if sync_task:
+        sync_task.cancel()
     if ws_connection:
         await ws_connection.close()
 
@@ -88,36 +125,6 @@ templates = Jinja2Templates(directory=frontend_path / "templates")
 
 
 # State update handler
-
-def parse_timestamp_safe(ts_str: str) -> datetime:
-    """
-    Parse timestamp string to datetime, handling various formats.
-    Returns epoch (1970) if parsing fails.
-    """
-    if not ts_str:
-        return datetime(1970, 1, 1)
-
-    try:
-        # Try ISO format with microseconds first (2025-12-10T21:04:31.957435)
-        return datetime.fromisoformat(ts_str.replace('Z', '+00:00').replace('+00:00', ''))
-    except (ValueError, AttributeError):
-        pass
-
-    try:
-        # Try simple format without microseconds (2025-12-10 21:13:36)
-        return datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
-    except (ValueError, AttributeError):
-        pass
-
-    try:
-        # Try ISO format without microseconds (2025-12-10T21:13:36)
-        return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")
-    except (ValueError, AttributeError):
-        pass
-
-    logger.warning(f"Failed to parse timestamp: {ts_str}")
-    return datetime(1970, 1, 1)
-
 
 async def handle_state_update(payload: dict):
     """Handle state update from Pi."""
@@ -138,11 +145,13 @@ async def handle_state_update(payload: dict):
 
             if cached_zone:
                 cached_updated_at = cached_zone.get("UpdatedAt")
-                # Compare timestamps as datetime objects - only update if incoming is newer or equal
+                # Compare timestamps - normalize both to same format (replace space with T)
                 if incoming_updated_at and cached_updated_at:
-                    incoming_dt = parse_timestamp_safe(incoming_updated_at)
-                    cached_dt = parse_timestamp_safe(cached_updated_at)
-                    if incoming_dt >= cached_dt:
+                    # Normalize timestamps: replace space with T for consistent comparison
+                    incoming_normalized = str(incoming_updated_at).replace(" ", "T")
+                    cached_normalized = str(cached_updated_at).replace(" ", "T")
+
+                    if incoming_normalized >= cached_normalized:
                         zone_cache[zone_name] = zone
                         updates_made += 1
                     else:
@@ -271,19 +280,6 @@ def get_cached_zones():
 
 def normalize_zone_dict(zone: dict) -> dict:
     """Convert zone dict from aliased field names to snake_case."""
-    # Get the updated_at timestamp and convert from UTC to Central Time
-    updated_at = zone.get("UpdatedAt") or zone.get("updated_at")
-    if updated_at and isinstance(updated_at, str):
-        try:
-            # Parse UTC timestamp
-            dt_utc = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
-            # Convert to Central Time
-            dt_central = dt_utc.astimezone(ZoneInfo("America/Chicago"))
-            # Format back to ISO string without timezone info (for display)
-            updated_at = dt_central.strftime("%Y-%m-%d %H:%M:%S")
-        except (ValueError, TypeError):
-            pass  # Keep original if parsing fails
-    
     return {
         "zone_name": zone.get("ZoneName") or zone.get("zone_name"),
         "room_name": zone.get("RoomName") or zone.get("room_name"),
@@ -292,7 +288,7 @@ def normalize_zone_dict(zone: dict) -> dict:
         "pipe_temp_f": zone.get("PipeTemp_F") or zone.get("pipe_temp_f"),
         "target_setpoint_f": zone.get("TargetSetpoint_F") or zone.get("target_setpoint_f"),
         "control_mode": zone.get("ControlMode") or zone.get("control_mode"),
-        "updated_at": updated_at,
+        "updated_at": zone.get("UpdatedAt") or zone.get("updated_at"),
         "updated_date": zone.get("UpdatedDate") or zone.get("updated_date"),
         "updated_time": zone.get("UpdatedTime") or zone.get("updated_time"),
     }
@@ -382,6 +378,20 @@ def list_zones():
     return zones
 
 
+@app.get("/api/zones/debug/{zone_name}")
+def debug_zone_cache(zone_name: str):
+    """Debug endpoint to inspect cache for a specific zone."""
+    cached = zone_cache.get(zone_name)
+    if not cached:
+        return {"error": f"Zone {zone_name} not in cache", "cache_keys": list(zone_cache.keys())}
+    return {
+        "zone_name": zone_name,
+        "cached_data": cached,
+        "cache_timestamp": cache_timestamp.isoformat() if cache_timestamp else None,
+        "cache_age_seconds": (datetime.utcnow() - cache_timestamp).total_seconds() if cache_timestamp else None
+    }
+
+
 @app.get("/api/zones/stats")
 async def get_zone_stats(
     window: str = Query("day", pattern="^(day|week|month)$"),
@@ -402,6 +412,136 @@ async def get_zone_stats(
     except httpx.HTTPError as e:
         logger.error(f"Failed to proxy zone stats to Pi: {e}")
         raise HTTPException(status_code=503, detail=f"Failed to fetch zone stats from Pi: {str(e)}")
+
+
+@app.get("/api/zones/{zone_name}/history")
+async def get_zone_history_local(
+    zone_name: str,
+    hours: int = Query(24, ge=1, le=720),
+    limit: int = Query(2000, ge=10, le=12000),
+    day: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    tz: str = Query("America/Denver"),
+    span_days: int = Query(1, ge=1, le=31),
+    max_samples: int = Query(4000, ge=200, le=20000),
+):
+    """
+    Get zone history from LOCAL NAS database (no Pi API call).
+    This is much faster and works even if Pi is unreachable.
+    """
+    from repositories import list_event_log_for_zone
+    from datetime import datetime, timedelta
+    import pytz
+
+    try:
+        if day:
+            # Day-based query
+            tz_obj = pytz.timezone(tz)
+            start_date = datetime.strptime(day, "%Y-%m-%d")
+            start_local = tz_obj.localize(start_date)
+            end_local = start_local + timedelta(days=span_days)
+
+            # Convert to UTC
+            start_utc = start_local.astimezone(pytz.UTC)
+            end_utc = end_local.astimezone(pytz.UTC)
+
+            events = list_event_log_for_zone(
+                zone_name,
+                since=start_utc.isoformat(),
+                until=end_utc.isoformat(),
+                limit=limit
+            )
+        else:
+            # Rolling hours query
+            since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+            events = list_event_log_for_zone(
+                zone_name,
+                since=since,
+                limit=limit
+            )
+
+        # Apply sampling if needed
+        if max_samples and len(events) > max_samples:
+            step = len(events) // max_samples
+            events = events[::step][:max_samples]
+
+        return events
+
+    except Exception as e:
+        logger.error(f"Error querying local history for {zone_name}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to query local database: {str(e)}")
+
+
+@app.post("/api/zones/history/batch")
+async def get_zones_history_batch_local(
+    request: Request,
+    hours: int = Query(24, ge=1, le=720),
+    limit: int = Query(2000, ge=10, le=12000),
+    day: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    tz: str = Query("America/Denver"),
+    span_days: int = Query(1, ge=1, le=31),
+    max_samples: int = Query(4000, ge=200, le=20000),
+):
+    """
+    Get history for multiple zones from LOCAL NAS database (no Pi API call).
+    This is the main endpoint used by the graphs page.
+    """
+    from repositories import list_event_log_for_zone
+    from datetime import datetime, timedelta
+    import pytz
+
+    try:
+        payload = await request.json()
+        zones = payload.get("zones", [])
+
+        if not zones:
+            return {"histories": {}}
+
+        histories = {}
+
+        if day:
+            # Day-based query
+            tz_obj = pytz.timezone(tz)
+            start_date = datetime.strptime(day, "%Y-%m-%d")
+            start_local = tz_obj.localize(start_date)
+            end_local = start_local + timedelta(days=span_days)
+
+            start_utc = start_local.astimezone(pytz.UTC)
+            end_utc = end_local.astimezone(pytz.UTC)
+
+            for zone in zones:
+                events = list_event_log_for_zone(
+                    zone,
+                    since=start_utc.isoformat(),
+                    until=end_utc.isoformat(),
+                    limit=limit
+                )
+                # Apply sampling
+                if max_samples and len(events) > max_samples:
+                    step = max(1, len(events) // max_samples)
+                    events = events[::step][:max_samples]
+                histories[zone] = events
+        else:
+            # Rolling hours query
+            since = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+            for zone in zones:
+                events = list_event_log_for_zone(
+                    zone,
+                    since=since,
+                    limit=limit
+                )
+                # Apply sampling
+                if max_samples and len(events) > max_samples:
+                    step = max(1, len(events) // max_samples)
+                    events = events[::step][:max_samples]
+                histories[zone] = events
+
+        return {"histories": histories}
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Error in batch history query: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to query local database: {str(e)}")
 
 
 @app.get("/api/events")
@@ -513,52 +653,6 @@ def health():
 def zone_statistics(zone_name: str):
     """Zone statistics (not implemented in distributed mode)."""
     raise HTTPException(status_code=501, detail="Statistics not yet available in distributed mode")
-
-
-@app.post("/api/zones/history/batch")
-async def zone_history_batch(
-    request: Request,
-    hours: int = Query(24, ge=1, le=720),
-    limit: int = Query(2000, ge=10, le=12000),
-    day: Optional[str] = Query(None),
-    tz: str = Query("America/Denver"),
-    span_days: int = Query(1, ge=1, le=31),
-    max_samples: int = Query(4000, ge=200, le=20000),
-):
-    """Proxy batch history requests to Pi controller."""
-    try:
-        # Get request body (zone list)
-        body = await request.json()
-
-        # Build query parameters
-        params = {
-            "hours": hours,
-            "limit": limit,
-            "tz": tz,
-            "span_days": span_days,
-            "max_samples": max_samples,
-        }
-        if day:
-            params["day"] = day
-
-        # Forward request to Pi
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{PI_HTTP_URL}/api/zones/history/batch",
-                json=body,
-                params=params
-            )
-            response.raise_for_status()
-            return response.json()
-    except httpx.HTTPError as e:
-        logger.error(f"Failed to proxy history request to Pi: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail=f"Failed to fetch history from Pi controller: {str(e)}"
-        )
-    except Exception as e:
-        logger.error(f"Error in history proxy: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/zones/{zone_name}/history")
@@ -675,18 +769,9 @@ async def create_preset(request: Request):
             )
             response.raise_for_status()
             return response.json()
-    except httpx.HTTPStatusError as e:
-        # Preserve the original status code and error detail from Pi
-        logger.error(f"Failed to create preset on Pi: {e.response.status_code} - {e.response.text}")
-        try:
-            error_detail = e.response.json()
-        except:
-            error_detail = e.response.text
-        raise HTTPException(status_code=e.response.status_code, detail=error_detail)
     except httpx.HTTPError as e:
         logger.error(f"Failed to proxy preset creation to Pi: {e}")
         raise HTTPException(status_code=503, detail=f"Failed to create preset on Pi: {str(e)}")
-
 
 
 @app.get("/api/schedule/presets/{preset_id}")

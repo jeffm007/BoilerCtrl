@@ -7,8 +7,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Any, Dict, Generator, Iterable, Tuple
 import sqlite3
-
-from .config import settings
+import os
 
 
 def dict_factory(cursor: sqlite3.Cursor, row: Tuple[Any, ...]) -> Dict[str, Any]:
@@ -23,7 +22,8 @@ def get_connection() -> Generator[sqlite3.Connection, None, None]:
     """
     Context manager that yields a SQLite database connection and guarantees it is closed.
     """
-    conn = sqlite3.connect(settings.database_path, timeout=5.0)
+    db_path = os.getenv("DB_PATH", "/app/data/boiler_controller.sqlite3")
+    conn = sqlite3.connect(db_path, timeout=5.0)
     conn.row_factory = dict_factory
     conn.execute("PRAGMA busy_timeout = 5000;")
     conn.execute("PRAGMA foreign_keys = ON;")
@@ -250,7 +250,7 @@ def bootstrap_zone_rows(conn: sqlite3.Connection) -> None:
             None,
             "AUTO",
         )
-        for zone in settings.zone_names
+        for zone in []  # Zones are created via API, not at initialization
         if zone not in existing_names
     ]
 
@@ -307,4 +307,5 @@ def init_db() -> None:
 
 if __name__ == "__main__":
     init_db()
-    print(f"SQLite database initialized at {settings.database_path}")
+    db_path = os.getenv("DB_PATH", "/app/data/boiler_controller.sqlite3")
+    print(f"SQLite database initialized at {db_path}")
