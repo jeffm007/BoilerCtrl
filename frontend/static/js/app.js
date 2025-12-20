@@ -1,4 +1,4 @@
-// VERSION: 5.8 - Interpret DB timestamps as MST (not UTC) 
+// VERSION: 5.8 - Interpret DB timestamps as MST (not UTC)
 console.log("🔧 App.js loaded - VERSION 5.8");
 const API_BASE = "/api";
 const DEFAULT_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -224,12 +224,12 @@ function parseUtcTimestamp(value) {
   // Timestamps in DB are MST, not UTC - parse them as MST
   // e.g., "2025-12-19T15:22:11" in DB means 15:22 MST, not UTC
   const normalized = value.replace(" ", "T").split(".")[0]; // Remove fractional seconds
-  
+
   // Parse the timestamp components
   const [datePart, timePart] = normalized.split("T");
   const [year, month, day] = datePart.split("-").map(Number);
   const [hour, minute, second] = (timePart || "00:00:00").split(":").map(Number);
-  
+
   // Create a date in the DB's timezone (MST)
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: DB_TIMESTAMP_TIMEZONE,
@@ -237,7 +237,7 @@ function parseUtcTimestamp(value) {
     hour: "2-digit", minute: "2-digit", second: "2-digit",
     hour12: false
   });
-  
+
   // Build the date as if it's MST
   const testDate = new Date(year, month - 1, day, hour, minute, second);
   const parts = formatter.formatToParts(testDate);
@@ -245,7 +245,7 @@ function parseUtcTimestamp(value) {
   for (const part of parts) {
     if (part.type !== "literal") values[part.type] = part.value;
   }
-  
+
   // Get UTC equivalent of this MST time
   const utcMs = Date.UTC(
     Number.parseInt(values.year, 10),
@@ -255,7 +255,7 @@ function parseUtcTimestamp(value) {
     Number.parseInt(values.minute, 10),
     Number.parseInt(values.second, 10)
   );
-  
+
   const offset = getTimezoneOffsetMs(testDate, DB_TIMESTAMP_TIMEZONE);
   return new Date(utcMs - offset);
 }
@@ -3367,22 +3367,11 @@ function getGraphsRangeSelection(dayOverride) {
   });
   if (range === "week") {
     if (normalizedDay) {
-      const startDate = parseUtcTimestamp(`${normalizedDay}T00:00:00Z`);
-      let dayBeforeNormalized = normalizedDay;
-      if (startDate) {
-        const adjusted = new Date(
-          Date.UTC(
-            startDate.getUTCFullYear(),
-            startDate.getUTCMonth(),
-            startDate.getUTCDate() - 1
-          )
-        );
-        dayBeforeNormalized = adjusted.toISOString().slice(0, 10);
-      }
+      // Show 7 days starting from the selected date
       return {
         range,
-        label: `Showing week starting ${formatDisplayDate(dayBeforeNormalized)}`,
-        params: { day: dayBeforeNormalized, spanDays: 7 },
+        label: `Showing week starting ${formatDisplayDate(normalizedDay)}`,
+        params: { day: normalizedDay, spanDays: 7 },
       };
     }
     return buildRolling(24 * 7, "Showing last 7 days (rolling).");
