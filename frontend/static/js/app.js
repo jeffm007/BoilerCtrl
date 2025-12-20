@@ -3333,12 +3333,21 @@ function getTodayIsoDate() {
 }
 
 function formatDisplayDate(isoValue) {
+  console.log("[formatDisplayDate] input:", isoValue);
   if (!isoValue) return isoValue;
   // Parse as local date, not UTC, to avoid timezone offset issues
   const [year, month, day] = isoValue.split('-').map(Number);
-  if (!year || !month || !day) return isoValue;
+  console.log("[formatDisplayDate] parsed:", { year, month, day });
+  if (!year || !month || !day || isNaN(year) || isNaN(month) || isNaN(day)) {
+    console.error("[formatDisplayDate] Invalid date components");
+    return isoValue;
+  }
   const parsed = new Date(year, month - 1, day);
-  if (Number.isNaN(parsed.getTime())) return isoValue;
+  if (Number.isNaN(parsed.getTime())) {
+    console.error("[formatDisplayDate] Invalid date object");
+    return isoValue;
+  }
+  console.log("[formatDisplayDate] valid date, formatting...");
   return parsed.toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
