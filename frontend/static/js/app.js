@@ -221,43 +221,17 @@ function getProp(obj, ...keys) {
 
 function parseUtcTimestamp(value) {
   if (!value) return null;
-  // Timestamps in DB are MST, not UTC - parse them as MST
-  // e.g., "2025-12-19T15:22:11" in DB means 15:22 MST, not UTC
+  // DB timestamps are stored as UTC ISO strings
+  // e.g., "2025-12-19T21:22:11" means 21:22 UTC (15:22 CST)
   const normalized = value.replace(" ", "T").split(".")[0]; // Remove fractional seconds
-
-  // Parse the timestamp components
-  const [datePart, timePart] = normalized.split("T");
-  const [year, month, day] = datePart.split("-").map(Number);
-  const [hour, minute, second] = (timePart || "00:00:00").split(":").map(Number);
-
-  // Create a date in the DB's timezone (MST)
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: DB_TIMESTAMP_TIMEZONE,
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-    hour12: false
-  });
-
-  // Build the date as if it's MST
-  const testDate = new Date(year, month - 1, day, hour, minute, second);
-  const parts = formatter.formatToParts(testDate);
-  const values = {};
-  for (const part of parts) {
-    if (part.type !== "literal") values[part.type] = part.value;
-  }
-
-  // Get UTC equivalent of this MST time
-  const utcMs = Date.UTC(
-    Number.parseInt(values.year, 10),
-    Number.parseInt(values.month, 10) - 1,
-    Number.parseInt(values.day, 10),
-    Number.parseInt(values.hour, 10),
-    Number.parseInt(values.minute, 10),
-    Number.parseInt(values.second, 10)
-  );
-
-  const offset = getTimezoneOffsetMs(testDate, DB_TIMESTAMP_TIMEZONE);
-  return new Date(utcMs - offset);
+  
+  // Add Z suffix if not present to indicate UTC
+  const utcString = normalized.includes("Z") ? normalized : normalized + "Z";
+  
+  const date = new Date(utcString);
+  if (isNaN(date.getTime())) return null;
+  
+  return date;
 }
 
 function getTimezoneOffsetMs(date, timeZone) {
