@@ -3438,11 +3438,11 @@ function buildHistoryRequest(options = undefined) {
   }
   let limitValue = 4000;
   if (estimatedHours > 24 && estimatedHours < 168) {
-    limitValue = 6000;
+    limitValue = 5000;  // Multi-day but less than week
   } else if (estimatedHours >= 168 && estimatedHours < 720) {
-    limitValue = 8000;
+    limitValue = 6000;  // Week view - reduced from 8000
   } else if (estimatedHours >= 720) {
-    limitValue = 12000;
+    limitValue = 8000;  // Month view - reduced from 12000
   }
   const params = new URLSearchParams({
     limit: String(limitValue),
@@ -3460,10 +3460,16 @@ function buildHistoryRequest(options = undefined) {
   const estimatedSpanDays = day
     ? resolvedSpanDays ?? 1
     : Math.max(1, estimatedHours / 24);
-  const maxSamplesTarget = Math.max(
-    800,
-    Math.min(4000, Math.round(estimatedSpanDays * 250))
-  );
+  // More aggressive downsampling to prevent browser hangs
+  // Day: 800 samples, Week: 600 samples, Month: 500 samples
+  let maxSamplesTarget;
+  if (estimatedSpanDays <= 1) {
+    maxSamplesTarget = 800;  // Day view
+  } else if (estimatedSpanDays <= 7) {
+    maxSamplesTarget = 600;  // Week view - reduced from ~1750
+  } else {
+    maxSamplesTarget = 500;  // Month view - reduced from ~7500
+  }
   params.set("max_samples", String(maxSamplesTarget));
   return {
     queryString: params.toString(),
