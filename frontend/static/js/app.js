@@ -224,17 +224,23 @@ function parseUtcTimestamp(value) {
   // DB timestamps are stored as UTC ISO strings
   // e.g., "2025-12-19T21:22:11" means 21:22 UTC (15:22 CST)
   const normalized = value.replace(" ", "T").split(".")[0]; // Remove fractional seconds
-  
+
   // Add Z suffix if not present to indicate UTC
   const utcString = normalized.includes("Z") ? normalized : normalized + "Z";
-  
+
   const date = new Date(utcString);
   if (isNaN(date.getTime())) return null;
-  
+
   return date;
 }
 
 function getTimezoneOffsetMs(date, timeZone) {
+  // Validate date before formatting
+  if (!date || isNaN(date.getTime())) {
+    console.error("[getTimezoneOffsetMs] Invalid date:", date);
+    return 0;
+  }
+  
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
     hour12: false,
@@ -275,12 +281,16 @@ function getTodayIso(timeZone) {
 }
 
 function getDayWindow(day, timeZone, spanDays = 1) {
-  if (!day) return null;
+  if (!day || typeof day !== 'string') {
+    console.error("[getDayWindow] Invalid day:", day);
+    return null;
+  }
   const [yearStr, monthStr, dayStr] = day.split("-");
   const year = Number.parseInt(yearStr, 10);
   const month = Number.parseInt(monthStr, 10);
   const dayNum = Number.parseInt(dayStr, 10);
   if ([year, month, dayNum].some(Number.isNaN)) {
+    console.error("[getDayWindow] Invalid date components:", { year, month, dayNum });
     return null;
   }
   const normalizedSpan = Math.max(1, Math.min(spanDays, 31));
