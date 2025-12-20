@@ -3349,6 +3349,7 @@ function formatDisplayDate(isoValue) {
 function getGraphsRangeSelection(dayOverride) {
   const range = graphsRangeSelect?.value || "day";
   const normalizedDay = resolveGraphsDayValue(dayOverride);
+  console.log("[getGraphsRangeSelection] range:", range, "normalizedDay:", normalizedDay);
   const buildRolling = (hours, label) => ({
     range,
     label,
@@ -3357,12 +3358,14 @@ function getGraphsRangeSelection(dayOverride) {
   if (range === "week") {
     if (normalizedDay && normalizedDay.match(/^\d{4}-\d{2}-\d{2}$/)) {
       // Show 7 days starting from the selected date
+      console.log("[getGraphsRangeSelection] Week view with valid date:", normalizedDay);
       return {
         range,
         label: `Showing week starting ${formatDisplayDate(normalizedDay)}`,
         params: { day: normalizedDay, spanDays: 7 },
       };
     }
+    console.log("[getGraphsRangeSelection] Week view - no valid date, using rolling");
     return buildRolling(24 * 7, "Showing last 7 days (rolling).");
   }
   if (range === "month") {
