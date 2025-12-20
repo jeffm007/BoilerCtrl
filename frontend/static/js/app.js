@@ -3827,7 +3827,16 @@ async function loadGraphsForDay(dayOverride, { force = false } = {}) {
     console.log("[Graphs] No cards found, returning early");
     return;
   }
-  const selection = getGraphsRangeSelection(dayOverride);
+  console.log("[Graphs] About to call getGraphsRangeSelection with dayOverride:", dayOverride);
+  let selection;
+  try {
+    selection = getGraphsRangeSelection(dayOverride);
+    console.log("[Graphs] getGraphsRangeSelection returned:", selection);
+  } catch (err) {
+    console.error("[Graphs] ERROR in getGraphsRangeSelection:", err);
+    console.error("[Graphs] Stack:", err.stack);
+    throw err;
+  }
   const request = buildHistoryRequest(selection.params);
   const zones = graphsState.cards.map((entry) => entry.zone);
   console.log("[Graphs] Loading history for zones:", zones);
