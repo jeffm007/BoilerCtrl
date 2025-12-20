@@ -1,9 +1,7 @@
-// VERSION: 5.8 - Interpret DB timestamps as MST (not UTC)
-console.log("🔧 App.js loaded - VERSION 5.8");
+// VERSION: 5.0 - Fixed avg runtime calculation
+console.log("🔧 App.js loaded - VERSION 5.0");
 const API_BASE = "/api";
-const DEFAULT_TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
-// IMPORTANT: Database timestamps are stored in MST (America/Denver), not UTC
-const DB_TIMESTAMP_TIMEZONE = "America/Denver";
+const DEFAULT_TIME_ZONE = "America/Denver";
 
 // Track recent overrides to prevent immediate refresh conflicts
 let recentOverrides = new Map(); // zoneName -> timestamp
@@ -23,7 +21,6 @@ const statsTotalHeader = document.getElementById("statsTotalHeader");
 const outsideTempEl = document.querySelector("#outsideTemp");
 const systemUpdatedEl = document.querySelector("#systemUpdated");
 const piStatusEl = document.getElementById("piStatus");
-const nasStatusEl = document.getElementById("nasStatus");
 const zoneSelect = document.querySelector("#zoneSelect");
 const daySelect = document.querySelector("#daySelect");
 const chartCanvas = document.getElementById("zoneChart");
@@ -221,26 +218,12 @@ function getProp(obj, ...keys) {
 
 function parseUtcTimestamp(value) {
   if (!value) return null;
-  // DB timestamps are stored as UTC ISO strings
-  // e.g., "2025-12-19T21:22:11" means 21:22 UTC (15:22 CST)
-  const normalized = value.replace(" ", "T").split(".")[0]; // Remove fractional seconds
-
-  // Add Z suffix if not present to indicate UTC
-  const utcString = normalized.includes("Z") ? normalized : normalized + "Z";
-
-  const date = new Date(utcString);
-  if (isNaN(date.getTime())) return null;
-
-  return date;
+  const normalised = value.includes("Z") ? value : `${value}Z`;
+  const parsed = new Date(normalised);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
 function getTimezoneOffsetMs(date, timeZone) {
-  // Validate date before formatting
-  if (!date || isNaN(date.getTime())) {
-    console.error("[getTimezoneOffsetMs] Invalid date:", date);
-    return 0;
-  }
-
   const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone,
     hour12: false,
@@ -266,7 +249,6 @@ function getTimezoneOffsetMs(date, timeZone) {
     Number.parseInt(values.minute, 10),
     Number.parseInt(values.second, 10)
   );
-  // Return negative offset for zones west of UTC (e.g., -21600000 for CST, -25200000 for MST)
   return utcEquivalent - date.getTime();
 }
 
@@ -281,16 +263,12 @@ function getTodayIso(timeZone) {
 }
 
 function getDayWindow(day, timeZone, spanDays = 1) {
-  if (!day || typeof day !== 'string') {
-    console.error("[getDayWindow] Invalid day:", day);
-    return null;
-  }
+  if (!day) return null;
   const [yearStr, monthStr, dayStr] = day.split("-");
   const year = Number.parseInt(yearStr, 10);
   const month = Number.parseInt(monthStr, 10);
   const dayNum = Number.parseInt(dayStr, 10);
   if ([year, month, dayNum].some(Number.isNaN)) {
-    console.error("[getDayWindow] Invalid date components:", { year, month, dayNum });
     return null;
   }
   const normalizedSpan = Math.max(1, Math.min(spanDays, 31));
@@ -887,19 +865,6 @@ function updatePiStatus(isOnline) {
   } else {
     piStatusEl.classList.add('status-offline');
     piStatusEl.classList.remove('status-online');
-  }
-}
-
-// Update NAS status indicator (always online since we're running on it)
-function updateNasStatus(isOnline = true) {
-  if (!nasStatusEl) return;
-
-  if (isOnline) {
-    nasStatusEl.classList.add('status-online');
-    nasStatusEl.classList.remove('status-offline');
-  } else {
-    nasStatusEl.classList.add('status-offline');
-    nasStatusEl.classList.remove('status-online');
   }
 }
 
@@ -2687,7 +2652,6 @@ const currentPage = document.body?.dataset.page || "dashboard";
 
 function initDashboardView() {
   hydrateDashboardFromCache();
-  updateNasStatus(true); // NAS is online if we're loading the page
   setPageLoading(false);
   if (shouldPollZones) {
     refreshZones();
@@ -2914,10 +2878,8 @@ function renderZoneChart(samplePoints, runEvents, zoneName, options = {}, contex
         if (utcMs < minUtc || utcMs >= maxUtc) {
           return null;
         }
-        // Convert UTC time to local time, then calculate position relative to day start
         const offset = getTimezoneOffsetMs(point.time, timeZone);
-        const localMs = utcMs + offset;
-        const axisMs = localMs - startLocal;
+        const axisMs = utcMs + offset - startLocal;
         return { timeMs: axisMs, value: point.value };
       })
       .filter(
@@ -2933,10 +2895,8 @@ function renderZoneChart(samplePoints, runEvents, zoneName, options = {}, contex
         if (utcMs < minUtc || utcMs >= maxUtc) {
           return null;
         }
-        // Convert UTC time to local time, then calculate position relative to day start
         const offset = getTimezoneOffsetMs(entry.time, timeZone);
-        const localMs = utcMs + offset;
-        const axisMs = localMs - startLocal;
+        const axisMs = utcMs + offset - startLocal;
         return { timeMs: axisMs, duration: entry.durationSeconds };
       })
       .filter(
@@ -2947,17 +2907,11 @@ function renderZoneChart(samplePoints, runEvents, zoneName, options = {}, contex
       )
       .sort((a, b) => a.timeMs - b.timeMs);
   } else {
-    // Rolling view - convert UTC timestamps to local time for display
     const rawSamples = samplePoints
-      .map((point) => {
-        const utcMs = point.time.getTime();
-        const offset = getTimezoneOffsetMs(point.time, timeZone);
-        return {
-          timeMs: utcMs + offset,
-          value: point.value,
-          originalUtcMs: utcMs,
-        };
-      })
+      .map((point) => ({
+        timeMs: point.time.getTime(),
+        value: point.value,
+      }))
       .filter(
         (entry) =>
           Number.isFinite(entry.timeMs) && !Number.isNaN(entry.value)
@@ -2986,14 +2940,10 @@ function renderZoneChart(samplePoints, runEvents, zoneName, options = {}, contex
     }
 
     runDataset = runEvents
-      .map((entry) => {
-        const utcMs = entry.time.getTime();
-        const offset = getTimezoneOffsetMs(entry.time, timeZone);
-        return {
-          timeMs: utcMs + offset,
-          duration: entry.durationSeconds,
-        };
-      })
+      .map((entry) => ({
+        timeMs: entry.time.getTime(),
+        duration: entry.durationSeconds,
+      }))
       .filter(
         (entry) => Number.isFinite(entry.timeMs) && Number.isFinite(entry.duration)
       )
@@ -3127,15 +3077,7 @@ function renderZoneChart(samplePoints, runEvents, zoneName, options = {}, contex
       } else {
         ctx.textAlign = "center";
       }
-      // For rolling view (no dayInfo), show actual clock time
-      let label;
-      if (!dayInfo) {
-        const tickDate = new Date(tickTime);
-        label = tickDate.getHours() + ':00';
-      } else {
-        label = `${hour}`;
-      }
-      ctx.fillText(label, x, height - padding.bottom + 12);
+      ctx.fillText(`${hour}h`, x, height - padding.bottom + 12);
       if (hour !== 0) {
         ctx.strokeStyle = "rgba(255,255,255,0.04)";
         ctx.beginPath();
@@ -3279,12 +3221,7 @@ function initializeChart() {
 function resolveGraphsDayValue(dayOverride) {
   if (dayOverride === null) return null;
   if (dayOverride === undefined) {
-    const inputValue = graphsDayInput?.value || null;
-    // Validate format YYYY-MM-DD
-    if (inputValue && !inputValue.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      return null;
-    }
-    return inputValue;
+    return graphsDayInput?.value || null;
   }
   return dayOverride;
 }
@@ -3324,70 +3261,45 @@ function getMonthSelectionInfo() {
   };
 }
 
-function getTodayIsoDate() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 function formatDisplayDate(isoValue) {
-  try {
-    console.log("[formatDisplayDate] input:", isoValue, "type:", typeof isoValue);
-    if (!isoValue || typeof isoValue !== 'string') {
-      console.error("[formatDisplayDate] Invalid input type");
-      return String(isoValue || '');
-    }
-    // Parse as local date, not UTC, to avoid timezone offset issues
-    const parts = isoValue.split('-');
-    console.log("[formatDisplayDate] split parts:", parts);
-    const [year, month, day] = parts.map(Number);
-    console.log("[formatDisplayDate] parsed numbers:", { year, month, day });
-    if (!year || !month || !day || isNaN(year) || isNaN(month) || isNaN(day)) {
-      console.error("[formatDisplayDate] Invalid date components");
-      return isoValue;
-    }
-    const parsed = new Date(year, month - 1, day);
-    console.log("[formatDisplayDate] Date object:", parsed, "isValid:", !isNaN(parsed.getTime()));
-    if (isNaN(parsed.getTime())) {
-      console.error("[formatDisplayDate] Invalid date object");
-      return isoValue;
-    }
-    console.log("[formatDisplayDate] About to format...");
-    const result = parsed.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-    console.log("[formatDisplayDate] Formatted result:", result);
-    return result;
-  } catch (err) {
-    console.error("[formatDisplayDate] EXCEPTION:", err, "input was:", isoValue);
-    return String(isoValue || '');
-  }
+  if (!isoValue) return isoValue;
+  const parsed = parseUtcTimestamp(`${isoValue}T00:00:00Z`);
+  if (!parsed) return isoValue;
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 function getGraphsRangeSelection(dayOverride) {
   const range = graphsRangeSelect?.value || "day";
   const normalizedDay = resolveGraphsDayValue(dayOverride);
-  console.log("[getGraphsRangeSelection] range:", range, "normalizedDay:", normalizedDay);
   const buildRolling = (hours, label) => ({
     range,
     label,
     params: { hours },
   });
   if (range === "week") {
-    if (normalizedDay && normalizedDay.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      // Show 7 days starting from the selected date
-      console.log("[getGraphsRangeSelection] Week view with valid date:", normalizedDay);
+    if (normalizedDay) {
+      const startDate = parseUtcTimestamp(`${normalizedDay}T00:00:00Z`);
+      let dayBeforeNormalized = normalizedDay;
+      if (startDate) {
+        const adjusted = new Date(
+          Date.UTC(
+            startDate.getUTCFullYear(),
+            startDate.getUTCMonth(),
+            startDate.getUTCDate() - 1
+          )
+        );
+        dayBeforeNormalized = adjusted.toISOString().slice(0, 10);
+      }
       return {
         range,
-        label: `Showing week starting ${formatDisplayDate(normalizedDay)}`,
-        params: { day: normalizedDay, spanDays: 7 },
+        label: `Showing week starting ${formatDisplayDate(dayBeforeNormalized)}`,
+        params: { day: dayBeforeNormalized, spanDays: 7 },
       };
     }
-    console.log("[getGraphsRangeSelection] Week view - no valid date, using rolling");
     return buildRolling(24 * 7, "Showing last 7 days (rolling).");
   }
   if (range === "month") {
@@ -3441,11 +3353,11 @@ function buildHistoryRequest(options = undefined) {
   }
   let limitValue = 4000;
   if (estimatedHours > 24 && estimatedHours < 168) {
-    limitValue = 5000;  // Multi-day but less than week
+    limitValue = 6000;
   } else if (estimatedHours >= 168 && estimatedHours < 720) {
-    limitValue = 6000;  // Week view - reduced from 8000
+    limitValue = 8000;
   } else if (estimatedHours >= 720) {
-    limitValue = 8000;  // Month view - reduced from 12000
+    limitValue = 12000;
   }
   const params = new URLSearchParams({
     limit: String(limitValue),
@@ -3463,16 +3375,10 @@ function buildHistoryRequest(options = undefined) {
   const estimatedSpanDays = day
     ? resolvedSpanDays ?? 1
     : Math.max(1, estimatedHours / 24);
-  // More aggressive downsampling to prevent browser hangs
-  // Day: 800 samples, Week: 600 samples, Month: 500 samples
-  let maxSamplesTarget;
-  if (estimatedSpanDays <= 1) {
-    maxSamplesTarget = 800;  // Day view
-  } else if (estimatedSpanDays <= 7) {
-    maxSamplesTarget = 600;  // Week view - reduced from ~1750
-  } else {
-    maxSamplesTarget = 500;  // Month view - reduced from ~7500
-  }
+  const maxSamplesTarget = Math.max(
+    800,
+    Math.min(4000, Math.round(estimatedSpanDays * 250))
+  );
   params.set("max_samples", String(maxSamplesTarget));
   return {
     queryString: params.toString(),
@@ -3827,16 +3733,7 @@ async function loadGraphsForDay(dayOverride, { force = false } = {}) {
     console.log("[Graphs] No cards found, returning early");
     return;
   }
-  console.log("[Graphs] About to call getGraphsRangeSelection with dayOverride:", dayOverride);
-  let selection;
-  try {
-    selection = getGraphsRangeSelection(dayOverride);
-    console.log("[Graphs] getGraphsRangeSelection returned:", selection);
-  } catch (err) {
-    console.error("[Graphs] ERROR in getGraphsRangeSelection:", err);
-    console.error("[Graphs] Stack:", err.stack);
-    throw err;
-  }
+  const selection = getGraphsRangeSelection(dayOverride);
   const request = buildHistoryRequest(selection.params);
   const zones = graphsState.cards.map((entry) => entry.zone);
   console.log("[Graphs] Loading history for zones:", zones);
@@ -4065,11 +3962,6 @@ function initializeGraphsPage() {
   }
 
   updateInputMode();
-
-  // Set default to today's date if not already set
-  if (graphsDayInput && !graphsDayInput.value) {
-    graphsDayInput.value = getTodayIsoDate();
-  }
 
   // Try to hydrate from cache first for instant display
   const selection = getGraphsRangeSelection();
